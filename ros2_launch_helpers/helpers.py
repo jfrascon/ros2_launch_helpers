@@ -11,7 +11,6 @@ from launch_ros.parameter_descriptions import ParameterFile
 
 DEFAULT_LOG_OPTIONS = {
     'log-level': 'info',  # One of: 'debug', 'info', 'warn', 'error'
-    'log-config-file': '',  # Path to a logging configuration file to use instead of the default
     'disable-stdout-logs': False,  # Whether to disable writing log messages to the console
     'disable-rosout-logs': False,  # Whether to disable writing log messages out to /rosout
     'disable-external-lib-logs': False,  # Whether to completely disable the use of an external logger
@@ -23,12 +22,13 @@ def default_log_options_str() -> str:
 
 
 LOG_OPTIONS_DESC = (
-    'key-value string, like "log-level=info,log-config-file=/path/to/loggers.conf,'
-    'disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,logger1_name=<level>,'
-    f'logger2_name=<level>". Optional (default: "{default_log_options_str()}")'
+    'key-value string, like "log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,'
+    'disable-external-lib-logs=True,logger1_name=<level>,logger2_name=<level>".'
+    f'Optional (default: "{default_log_options_str()}")'
 )
 
 DEFAULT_NODE_OPTIONS = {
+    'name': '',  # Node name (if empty, use default from the node executable)
     'output': 'screen',  # One of: 'screen', 'log', 'both'
     'emulate_tty': True,  # Whether to emulate a TTY for the node's stdout/stderr (usually True for 'screen' or 'both')
     'respawn': False,  # Whether to respawn the node if it dies
@@ -41,16 +41,19 @@ def default_node_options_str() -> str:
 
 
 NODE_OPTIONS_DESC = (
-    'key-value string, like "output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
+    'key-value string, like "name=any_name,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
     f'Optional (default: "{default_node_options_str()}")'
 )
+
+REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
+
 
 # ------------------------------------------------------------------------------
 # Non-opaque functions.
 # ------------------------------------------------------------------------------
 
 
-def get_params(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
+def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
     """
     Build the parameters field with a base parameter file and optional files overlaying it.
     :param params_file: Path to the base YAML file with ros__parameters (required).
@@ -63,8 +66,6 @@ def get_params(params_file: str, overlay_params_file_list: str = '') -> list[Any
         raise ValueError('params_file is required')
 
     parameters = [ParameterFile(params_file, allow_substs=True)]
-
-    print(f'Parameters 1: {parameters[0]}')
 
     if not overlay_params_file_list:
         return parameters
@@ -82,15 +83,94 @@ def get_params(params_file: str, overlay_params_file_list: str = '') -> list[Any
         # Defer substitutions, env, package shares to launch.
         parameters.append(ParameterFile(p_file, allow_substs=True))
 
-    print(f'Parameters 2: {parameters}')
-
     return parameters
 
 
-REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
+def merge_yaml_maps_strict(
+    defaults: Mapping[str, Any],
+    override: Mapping[str, Any],
+    keypath_sep: str = '§',
+    flat_sep: str = '.',
+    allow_none: bool = True,
+    numeric_compat: bool = False,
+) -> Tuple[Dict[str, Any], List, List]:
+    def same_type(a, b, numeric_compat: bool = False) -> bool:
+        """
+        Return True if 'b' is allowed to override 'a' according to type rules.
+
+        Rules:
+        1) Exact type match passes (type(a) is type(b)).
+        2) If numeric_compat is True, allow int <-> float interchange,
+            but never allow bool (since bool is a subclass of int in Python).
+        3) Otherwise, types must match exactly.
+
+        Examples:
+        same_type(3, 7) -> True
+        same_type(3, 7.0) -> False
+        same_type(3, 7.0, numeric_compat=True) -> True
+        same_type(True, 1, numeric_compat=True) -> False  # bool explicitly excluded
+        same_type([1], [2]) -> True
+        same_type([1], "x") -> False
+        """
+        if type(a) is type(b):
+            return True
+
+        # Optional numeric compatibility (int <-> float), but exclude bool explicitly.
+        # 'numbers.Real' captures int and float and bool, so we must filter bool out.
+        if numeric_compat and isinstance(a, numbers.Real) and isinstance(b, numbers.Real):
+            return not isinstance(a, bool) and not isinstance(b, bool)
+
+        # All other combinations are not allowed.
+        return False
+
+    # Wrap with benedict using a keypath separator that doesn't appear in keys
+    d = benedict(defaults, keypath_separator=keypath_sep)
+    o = benedict(override, keypath_separator=keypath_sep)
+
+    # Flatten both with dotted paths (independent from keypath sep)
+    d_flatten = d.flatten(flat_sep)
+    o_flatten = o.flatten(flat_sep)
+
+    merged_flat = {}
+    applied = []
+    ignored = []
+
+    # Walk only default keys -> overlay strict
+    for dk, dv in d_flatten.items():
+        if dk in o_flatten:
+            ov = o_flatten[dk]
+            # Allow None values if specified
+            if ov is None:
+                if allow_none:
+                    merged_flat[dk] = None
+                    applied.append(dk)
+                else:
+                    # Treat None as 'missing override': inherit default and record as ignored
+                    merged_flat[dk] = dv
+                    ignored.append(dk)
+                continue
+
+            if not same_type(dv, ov, numeric_compat):
+                raise TypeError(f'{dk}: type mismatch (default={type(dv).__name__}, override={type(ov).__name__})')
+
+            # Lists replace lists; scalars replace scalars – both covered by type check
+            merged_flat[dk] = ov
+            applied.append(dk)
+        else:
+            merged_flat[dk] = dv
+
+    # Collect extras from override (ignored by design)
+    for ok in o_flatten.keys():
+        if ok not in d_flatten:
+            ignored.append(ok)
+
+    # Rebuild nested dict
+    nested = benedict(merged_flat, keypath_separator=keypath_sep).unflatten(separator=flat_sep)
+
+    return nested, applied, ignored
 
 
-def parse_cli_remappings(cli_remappings: str = '') -> List[Tuple[str, str]]:
+def parse_cli_remappings(cli_remappings: Optional[str]) -> Optional[List[Tuple[str, str]]]:
     """
     Parse the CLI remappings string into a list of (from, to) tuples.
     :param cli_remappings: Key-value string for topic remappings.
@@ -100,12 +180,18 @@ def parse_cli_remappings(cli_remappings: str = '') -> List[Tuple[str, str]]:
     cli_remappings="/a:=/b,/c:=d,e:=/f,g:=h"
     ouput: [('/a', '/b'), ('/c', 'd'), ('e', '/f'), ('g', 'h')]
     """
-    remappings: List[Tuple[str, str]] = []
+
+    # If no CLI remappings are provided or not a string, return None.
+    if not isinstance(cli_remappings, str):
+        return None
 
     cli_r = cli_remappings.strip()
 
+    # If the CLI remappings string is empty, return None.
     if not cli_r:
-        return remappings
+        return None
+
+    remappings: List[Tuple[str, str]] = []
 
     for from_to in cli_r.split(','):
         from_to = from_to.strip()
@@ -129,25 +215,24 @@ def parse_cli_remappings(cli_remappings: str = '') -> List[Tuple[str, str]]:
     return remappings
 
 
-def parse_cli_log_opts(cli_log_opts: str = '') -> List[str]:
+def parse_cli_log_opts(cli_log_opts: Optional[str]) -> List[str]:
     """
     Parse the CLI log options string into a ROS arguments string.
     :param cli_log_opts: Key-value string for ROS logging options.
     :return: ROS arguments string.
 
     Example
-    cli_log_opts="log-level=info,log-config-file=/path/to/loggers.conf,disable-stdout-logs=True,
-                  disable-rosout-logs=True,disable-external-lib-logs=True,logger1_name=<level>,logger2_name=<level>"
-    output: "--ros-args --log-level info --log-config-file /path/to/loggers.conf --disable-stdout-logs
-             --disable-rosout-logs --disable-external-lib-logs --logger logger1_name=<level>
-             --logger logger2_name=<level>"
+    cli_log_opts="log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,
+                  logger1_name=<level>,logger2_name=<level>"
+    output: [--log-level, info, --disable-stdout-logs, --disable-rosout-logs, --disable-external-lib-logs, --logger,
+             logger1_name=<level>, --logger, logger2_name=<level>]
     """
 
     def to_ros_args(log_opts: Dict[str, Any]) -> List[str]:
         args = []
 
         for k, v in log_opts.items():
-            if k == 'log-level' or k == 'log-config-file':
+            if k == 'log-level':
                 v = v.strip()
                 if v:
                     args.extend([f'--{k}', v])
@@ -167,8 +252,13 @@ def parse_cli_log_opts(cli_log_opts: str = '') -> List[str]:
     # - In case 'cli_log_opts' is empty, we use the default log options.
     log_opts: Dict[str, Union[str, bool]] = DEFAULT_LOG_OPTIONS.copy()
 
+    # If no CLI log options are provided, return the default log options as ROS args.
+    if not isinstance(cli_log_opts, str):
+        return to_ros_args(log_opts)
+
     cli_l_o = cli_log_opts.strip()
 
+    # If the CLI log options string is empty, return the default log options as ROS args.
     if not cli_l_o:
         return to_ros_args(log_opts)
 
@@ -190,8 +280,6 @@ def parse_cli_log_opts(cli_log_opts: str = '') -> List[str]:
             case 'log-level':
                 if val in ('debug', 'info', 'warn', 'error'):
                     log_opts[key] = val
-            case 'log-config-file':
-                log_opts[key] = val  # No validation
             case 'disable-stdout-logs':
                 if val in ('true', 'false'):
                     log_opts[key] = val == 'true'
@@ -211,7 +299,7 @@ def parse_cli_log_opts(cli_log_opts: str = '') -> List[str]:
     return to_ros_args(log_opts)
 
 
-def parse_cli_node_opts(cli_node_opts: str) -> Dict[str, Union[str, bool, float]]:
+def parse_cli_node_opts(cli_node_opts: Optional[str]) -> Dict[str, Union[str, bool, float]]:
     """
     Parse the CLI node options string into a dictionary.
     :param cli_node_opts: Key-value string for node options.
@@ -223,8 +311,13 @@ def parse_cli_node_opts(cli_node_opts: str) -> Dict[str, Union[str, bool, float]
     """
     node_opts: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
 
+    # If no CLI node options are provided or not a string, return the default node options.
+    if not isinstance(cli_node_opts, str):
+        return node_opts
+
     cli_n_o = cli_node_opts.strip()
 
+    # If the CLI node options string is empty, return the default node options.
     if not cli_n_o:
         return node_opts
 
@@ -239,10 +332,20 @@ def parse_cli_node_opts(cli_node_opts: str) -> Dict[str, Union[str, bool, float]
         key = key.strip().lower()
         val = val.strip().lower()
 
-        if not key or key not in DEFAULT_NODE_OPTIONS or not val:
+        if not key or key not in DEFAULT_NODE_OPTIONS:
             continue
 
         match key:
+            case 'name':
+                if (
+                    val
+                    and val != 'none'
+                    and val != 'null'
+                    and val != 'undefined'
+                    and val != 'unknown'
+                    and val != 'default'
+                ):
+                    node_opts[key] = val
             case 'output':
                 if val in ('screen', 'log', 'both'):
                     node_opts[key] = val
@@ -261,6 +364,37 @@ def parse_cli_node_opts(cli_node_opts: str) -> Dict[str, Union[str, bool, float]
                 pass
 
     return node_opts
+
+
+def resolve_file(file: Optional[str]) -> str:
+    resolved_file: str = ''
+
+    if not isinstance(file, str):
+        return resolved_file
+
+    file = file.strip()
+
+    if not file:
+        return resolved_file
+
+    if file.startswith('package://'):
+        rest = file[len('package://') :]
+
+        if '/' not in rest:
+            raise ValueError(f"File URI must be 'package://<pkg>/<path>' (got: '{file}')")
+
+        pkg, relative_file = rest.split('/', 1)
+        # Raises 'PackageNotFoundError' if the package is not found.
+        # Raises 'ValueError' if the package name is invalid.
+        parent_path = get_package_share_directory(pkg)
+        resolved_file = os.path.join(parent_path, relative_file)
+    elif file.startswith('file://'):
+        resolved_file = os.path.expanduser(file[len('file://') :])
+
+        if not os.path.isabs(resolved_file):
+            raise ValueError(f"File URI must point to an absolute path (got: '{resolved_file}')")
+
+    return resolved_file
 
 
 def validate_name(s: str) -> Optional[bool]:
@@ -369,7 +503,6 @@ def set_global_namespace(ctx: LaunchContext, namespace_key: str = 'namespace') -
 
     return [SetLaunchConfiguration(namespace_key, ns_norm)]
 
-
 def set_robot_namespace(
     ctx: LaunchContext, namespace_key: str = 'namespace', robot_name_key: str = 'robot_name'
 ) -> list[LaunchDescriptionEntity]:
@@ -477,7 +610,6 @@ def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> 
 #         'precedence. Optional (default: "")'
 #     )
 #     # log-level: The default log level for the node. One of: debug, info, warn, error.
-#     # log-config-file: Path to a logging configuration file to use instead of the default.
 #     # disable-stdout-logs: Whether to disable writing log messages to the console.
 #     # disable-rosout-logs: Whether to disable writing log messages out to /rosout. This can significantly save on
 #     #                      network bandwidth, but external observers will not be able to monitor logging.
@@ -519,7 +651,7 @@ def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> 
 
 # def get_help_context(context: LaunchContext) -> HelpContext:
 #     return HelpContext(
-#         parameters=_get_params(
+#         parameters=_get_parameters(
 #             LaunchConfiguration('params_file').perform(context),
 #             LaunchConfiguration('overlay_params_file_list').perform(context),
 #         ),

@@ -22,7 +22,7 @@ DeclareLaunchArgument('remappings', default_value='', description=rlh.REMAPPINGS
 DeclareLaunchArgument('log_options', default_value=rlh.default_log_options_str(), description=rlh.LOG_OPTIONS_DESC)
 DeclareLaunchArgument('node_options', default_value=rlh.default_node_options_str(), description=rlh.NODE_OPTIONS_DESC)
 
-parameters = rlh.get_params(params_file, overlay_params_file_list)
+parameters = rlh.get_parameters(params_file, overlay_params_file_list)
 ```
 
 This allows your nodes to receive advanced and customizable configurations in a simple and consistent way.
