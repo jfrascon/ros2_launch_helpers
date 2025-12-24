@@ -1,7 +1,9 @@
 import numbers
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
+import yaml
 from ament_index_python.packages import get_package_share_directory
 from benedict import benedict
 from launch import LaunchContext, LaunchDescriptionEntity
@@ -9,7 +11,7 @@ from launch.actions import SetLaunchConfiguration
 from launch.substitutions import LaunchConfiguration
 from launch_ros.parameter_descriptions import ParameterFile
 
-DEFAULT_LOG_OPTIONS = {
+DEFAULT_LOGGING_OPTIONS = {
     'log-level': 'info',  # One of: 'debug', 'info', 'warn', 'error'
     'disable-stdout-logs': False,  # Whether to disable writing log messages to the console
     'disable-rosout-logs': False,  # Whether to disable writing log messages out to /rosout
@@ -17,14 +19,13 @@ DEFAULT_LOG_OPTIONS = {
 }
 
 
-def default_log_options_str() -> str:
-    return ','.join(f'{k}={v}' for k, v in DEFAULT_LOG_OPTIONS.items())
+def default_logging_options_str() -> str:
+    return ','.join(f'{k}={v}' for k, v in DEFAULT_LOGGING_OPTIONS.items())
 
 
-LOG_OPTIONS_DESC = (
+LOGGING_OPTIONS_DESC = (
     'key-value string, like "log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,'
     'disable-external-lib-logs=True,logger1_name=<level>,logger2_name=<level>".'
-    f'Optional (default: "{default_log_options_str()}")'
 )
 
 DEFAULT_NODE_OPTIONS = {
@@ -42,15 +43,177 @@ def default_node_options_str() -> str:
 
 NODE_OPTIONS_DESC = (
     'key-value string, like "name=any_name,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
-    f'Optional (default: "{default_node_options_str()}")'
 )
 
-REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
+TOPIC_REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
+
+################################################################################
+# Opaque functions.
+################################################################################
 
 
-# ------------------------------------------------------------------------------
+def set_global_namespace(ctx: LaunchContext, namespace_key: str = 'namespace') -> list[LaunchDescriptionEntity]:
+    """
+    Set a global namespace LaunchConfiguration by normalizing the provided namespace.
+    :param ctx: Launch context.
+    :param namespace_key: Key for the namespace LaunchConfiguration (default: 'namespace').
+    :return:
+    Create a global namespace from the provided namespace.
+
+    Semantics:
+    - ''  -> '/'
+    - '/' -> '/'
+    - 'ns', '/ns', 'ns/', '/ns/' -> '/ns'
+    - Reject spaces, consecutive '/', and non [A-Za-z0-9_] chars in segments.
+    """
+    namespace = LaunchConfiguration(namespace_key).perform(ctx)
+    return [SetLaunchConfiguration(namespace_key, create_global_namespace(namespace))]
+
+
+def set_robot_namespace(
+    ctx: LaunchContext, namespace_key: str = 'namespace', robot_name_key: str = 'robot_name'
+) -> list[LaunchDescriptionEntity]:
+    """
+    Set the 'robot_namespace' LaunchConfiguration by combining 'namespace' and 'robot_name'.
+    :param ctx: Launch context.
+    :param namespace_key: Key for the base namespace LaunchConfiguration (default: 'namespace').
+    :param robot_name_key: Key for the robot name LaunchConfiguration (default: 'robot_name').
+    :return: List with a SetLaunchConfiguration for 'robot_namespace'.
+    """
+
+    namespace = LaunchConfiguration(namespace_key).perform(ctx)
+    robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
+    return [SetLaunchConfiguration('robot_namespace', create_robot_namespace(namespace, robot_name))]
+
+
+def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> list[LaunchDescriptionEntity]:
+    """
+    Set the 'robot_prefix' LaunchConfiguration by creating it from 'robot_name'.
+    :param ctx: Launch context.
+    :param robot_name_key: Key for the robot name LaunchConfiguration (default: 'robot_name').
+    :return: List with a SetLaunchConfiguration for 'robot_prefix'.
+    """
+    robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
+    return [SetLaunchConfiguration('robot_prefix', create_robot_prefix(robot_name))]
+
+
+################################################################################
 # Non-opaque functions.
-# ------------------------------------------------------------------------------
+################################################################################
+
+
+def create_global_namespace(namespace: str) -> str:
+    if not isinstance(namespace, str):
+        raise ValueError('Namespace must be a string')
+
+    namespace = namespace.strip()
+
+    # Empty namespace becomes root '/'.
+    if namespace == '':
+        return '/'
+
+    # Already root.
+    if namespace == '/':
+        return '/'
+
+    # A namespace should not end in a '/'; remove any trailing '/' to normalize.
+    namespace = namespace.rstrip('/')
+
+    # A global namespace must start with a '/'.
+    if not namespace.startswith('/'):
+        namespace = '/' + namespace
+
+    namespace_is_valid, error_msg = is_valid_namespace(namespace)
+
+    if not namespace_is_valid:
+        raise RuntimeError(f"Invalid namespace '{namespace}': {error_msg}")
+
+    return namespace
+
+
+def create_robot_namespace(namespace: str, robot_name: str) -> str:
+    """
+    Create a robot namespace by combining a base namespace and a robot name.
+    :param namespace: Base namespace (can be empty or '/').
+    :param robot_name: Robot name (must be a valid name).
+    :return: Combined robot namespace.
+    """
+    # The 'robot_namespace' is the concatenation of the 'namespace' and the 'robot_name', using the character '/' a
+    # separtor.
+    # namespace=''          -> robot_namespace = robot_name
+    # namespace='/'         -> robot_namespace = '/' + robot_name
+    # namespace='ns'        -> robot_namespace = 'ns' + '/' + robot_name
+    # namespace='ns/'       -> robot_namespace = 'ns' + '/' + robot_name
+    # namespace='/ns/'      -> robot_namespace = '/ns' + '/' + robot_name
+    # namespace='/ns1/ns2'  -> robot_namespace = '/ns1/ns2' + '/' + robot_name
+    # namespace='/ns1/ns2/' -> robot_namespace = '/ns1/ns2' + '/' + robot_name
+
+    if not isinstance(namespace, str):
+        raise ValueError('Namespace must be a string')
+
+    if not isinstance(robot_name, str):
+        raise ValueError('Robot name must be a string')
+
+    # Remove extra white spaces at the beginning and the end of the robot's name.
+    robot_name = robot_name.strip()
+
+    if not is_valid_name(robot_name):
+        raise RuntimeError(f"'{robot_name}' must be a non-empty string with ASCII [A-Za-z0-9_] only")
+
+    if namespace in ('', '/'):
+        return namespace + robot_name
+
+    # Ensure namespace does not end with '/', so we can safely concatenate 'namespace + '/' + robot_name', proven
+    # the namespace is valid.
+    if namespace.endswith('/'):
+        namespace = namespace.rstrip('/')
+
+    namespace_is_valid, error_msg = is_valid_namespace(namespace)
+
+    if not namespace_is_valid:
+        raise RuntimeError(f"Invalid namespace '{namespace}': {error_msg}")
+
+    # Note: The namespace does not end in '/', but it may or may not start with '/', depending on what the user
+    # provided, since this is not enforced here.
+
+    return f'{namespace}/{robot_name}'
+
+
+def create_robot_prefix(robot_name: str) -> str:
+    if not isinstance(robot_name, str):
+        raise ValueError('Robot name must be a string')
+
+    # Remove extra white spaces at the beginning and the end of the robot's name.
+    robot_name = robot_name.strip()
+
+    if not is_valid_name(robot_name):
+        raise RuntimeError(f"'{robot_name}' must be a non-empty string with ASCII [A-Za-z0-9_] only")
+
+    # If the robot name already ends with '_', return it as is.
+    # It is discouraged to have robot names ending with '_', but technically it is allowed, since
+    # the 'is_valid_name' function allows it.
+    if robot_name.endswith('_'):
+        return robot_name
+    else:
+        return f'{robot_name}_'
+
+
+def dottify_namespace(namespace: str) -> str:
+    """
+    Convert a namespace into a dot-separated format.
+    :param namespace: Namespace string.
+    :return: Dot-separated namespace string.
+    """
+    return _replace_separator_in_namespace(namespace, '.')
+
+
+def underscorify_namespace(namespace: str) -> str:
+    """
+    Convert a namespace into an underscore-separated format.
+    :param namespace: Namespace string.
+    :return: Underscore-separated namespace string.
+    """
+    return _replace_separator_in_namespace(namespace, '_')
 
 
 def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
@@ -84,6 +247,87 @@ def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list
         parameters.append(ParameterFile(p_file, allow_substs=True))
 
     return parameters
+
+
+def is_valid_name(s: str) -> bool:
+    """
+    Validate characters of a string segment.
+
+    Returns:
+        - True  -> all characters are valid (ASCII alnum or underscore).
+        - False -> at least one invalid character found.
+        - None  -> input is empty; considered 'not evaluable' at this level.
+
+    Notes:
+        - This function does not raise; it only reports.
+        - Policy decisions (e.g., whether empty is allowed) belong to the caller.
+    """
+    if not isinstance(s, str):
+        return False
+
+    s = s.strip()
+
+    if not s:
+        return False
+
+    # Check all characters.
+    # Valid characters are ASCII alphanumeric or underscore, [A-Za-z0-9_].
+    # If any other character is found, return False.
+    return all((c == '_') or (c.isascii() and c.isalnum()) for c in s)
+
+
+def is_valid_namespace(ns: str) -> Tuple[bool, str]:
+    """
+    Validate a namespace string.
+
+    Rules:
+    - '' and '/' are permitted as special cases (root/empty).
+    - Reject empty segments (no '//' allowed at any position).
+    - Each non-empty segment must be valid, i.e., ASCII alnum or underscore only, [A-Za-z0-9_].
+    """
+    if ns in ('', '/'):
+        return (True, '')
+
+    # When two or more slashes are contiguos, when you split the string by '/', you get empty segments.
+    # For example:
+    # 'ns1//ns2'   -> ['ns1', '', 'ns2'] --> two or more '/' in a row
+    # '/ns1//ns2/' -> ['', 'ns1', '', 'ns2', ''] -> the first and last are false positives.
+
+    # In order to check if there are two or more '/' in a row, we need to first remove the leading and trailing slashes
+    # if present.
+
+    # Remove EXACTLY ONE leading slash.
+    if ns.startswith('/'):
+        ns = ns[1:]
+
+    # Remove EXACTLY ONE trailing slash.
+    if ns.endswith('/'):
+        ns = ns[:-1]
+
+    # If ns is '//', after removing leading and trailing slashes, it becomes '', which is an invalid namespace.
+    if not ns:
+        return (False, "Namespace cannot be empty after removing leading and trailing '/'")
+
+    # Examples at this point:
+    # '/ns1//ns2/' -> 'ns1//ns2' -> ['ns1', '', 'ns2'] -> two or more '/' in a row, this is an error.
+    # But
+    # '/ns1/ns2/'  -> 'ns1/ns2'  -> ['ns1', 'ns2']  -> OK. The leadind and trailing slashes are OK, although the
+    #                                                      trailing slash is not necessary.
+
+    items = ns.split('/')
+
+    for item in items:
+        # Empty items means two or more '/' in a row, so this is an error.
+        # Technically, we could have removed this 'if not item' check, since 'is_valid_name' would return False for
+        # empty strings, but this way we can provide a more specific error message.
+        if not item:
+            return (False, "Consecutive '/' are not allowed in a namespace")
+
+        # Check the item is in valid, which means ASCII alnum or underscore only, [A-Za-z0-9_].
+        if not is_valid_name(item):
+            return (False, 'Namespace segments must be ASCII [A-Za-z0-9_] only')
+
+    return (True, '')
 
 
 def merge_yaml_maps_strict(
@@ -170,68 +414,25 @@ def merge_yaml_maps_strict(
     return nested, applied, ignored
 
 
-def parse_cli_remappings(cli_remappings: Optional[str]) -> Optional[List[Tuple[str, str]]]:
-    """
-    Parse the CLI remappings string into a list of (from, to) tuples.
-    :param cli_remappings: Key-value string for topic remappings.
-    :return: List of (from, to) tuples.
-
-    Example
-    cli_remappings="/a:=/b,/c:=d,e:=/f,g:=h"
-    ouput: [('/a', '/b'), ('/c', 'd'), ('e', '/f'), ('g', 'h')]
-    """
-
-    # If no CLI remappings are provided or not a string, return None.
-    if not isinstance(cli_remappings, str):
-        return None
-
-    cli_r = cli_remappings.strip()
-
-    # If the CLI remappings string is empty, return None.
-    if not cli_r:
-        return None
-
-    remappings: List[Tuple[str, str]] = []
-
-    for from_to in cli_r.split(','):
-        from_to = from_to.strip()
-
-        if not from_to:
-            continue
-
-        if ':=' not in from_to:
-            continue  # Ignore invalid remapping
-
-        from_expr, to_expr = from_to.split(':=', 1)
-
-        from_expr = from_expr.strip()
-        to_expr = to_expr.strip()
-
-        if not from_expr or not to_expr:
-            continue  # Ignore invalid remapping
-
-        remappings.append((from_expr, to_expr))
-
-    return remappings
-
-
-def parse_cli_log_opts(cli_log_opts: Optional[str]) -> List[str]:
+def process_logging_options(logging_options: Optional[str], namespace: str, node_name: str) -> List[str]:
     """
     Parse the CLI log options string into a ROS arguments string.
-    :param cli_log_opts: Key-value string for ROS logging options.
+    :param logging_options: Key-value string for ROS logging options.
     :return: ROS arguments string.
 
+    Reference: https://docs.ros.org/en/rolling/Tutorials/Demos/Logging-and-logger-configuration.html
+
     Example
-    cli_log_opts="log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,
+    logging_options="log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,
                   logger1_name=<level>,logger2_name=<level>"
     output: [--log-level, info, --disable-stdout-logs, --disable-rosout-logs, --disable-external-lib-logs, --logger,
              logger1_name=<level>, --logger, logger2_name=<level>]
     """
 
-    def to_ros_args(log_opts: Dict[str, Any]) -> List[str]:
+    def to_ros_args(logging_opts: Dict[str, Any]) -> List[str]:
         args = []
 
-        for k, v in log_opts.items():
+        for k, v in logging_opts.items():
             if k == 'log-level':
                 v = v.strip()
                 if v:
@@ -239,74 +440,98 @@ def parse_cli_log_opts(cli_log_opts: Optional[str]) -> List[str]:
             elif k == 'disable-stdout-logs' or k == 'disable-rosout-logs' or k == 'disable-external-lib-logs':
                 if v:
                     args.append(f'--{k}')
+            # If it is not one of the known keys, it must be a custom logger level.
             else:
-                # Custom logger levels
                 v = v.strip()
                 if v:
-                    args.extend([f'--logger {k}', v])
+                    args.extend(['--log-level', f'{k}:={v}'])
 
         return args
 
-    # Passing default values to 'log_opts', so:
+    # Passing default values to 'logging_opts', so:
     # - In case a key is missing, it gets the default value.
-    # - In case 'cli_log_opts' is empty, we use the default log options.
-    log_opts: Dict[str, Union[str, bool]] = DEFAULT_LOG_OPTIONS.copy()
+    # - In case 'logging_options' is empty, we use the default log options.
+    logging_opts: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
 
     # If no CLI log options are provided, return the default log options as ROS args.
-    if not isinstance(cli_log_opts, str):
-        return to_ros_args(log_opts)
+    if not isinstance(logging_options, str):
+        return to_ros_args(logging_opts)
 
-    cli_l_o = cli_log_opts.strip()
+    logging_options = logging_options.strip()
 
     # If the CLI log options string is empty, return the default log options as ROS args.
-    if not cli_l_o:
-        return to_ros_args(log_opts)
+    if not logging_options:
+        return to_ros_args(logging_opts)
 
-    for log_opt in cli_l_o.split(','):
-        log_opt = log_opt.strip()
+    # Iterate over each key-value pair in the log options string.
+    for logging_option in logging_options.split(','):
+        logging_option = logging_option.strip()
 
-        if not log_opt or '=' not in log_opt:
+        # If the element between commas is empty or does not contain '=', skip it.
+        if not logging_option or '=' not in logging_option:
             continue
 
-        key, val = log_opt.split('=', 1)
+        # Split only on the first '='. It should be key=value, but value could contain '='.
+        key, val = logging_option.split('=', 1)
 
-        key = key.strip().lower()
+        # Strip leading and trailing spaces.
+        # Key must be passed as is (case-sensitive), but we allow values to be case-insensitive, so we convert them to
+        # lower case for easier comparison.
+        key = key.strip()
         val = val.strip().lower()
 
+        # If no key or value is provided, skip it.
         if not key or not val:
             continue
 
         match key:
             case 'log-level':
                 if val in ('debug', 'info', 'warn', 'error'):
-                    log_opts[key] = val
+                    logging_opts[key] = val
             case 'disable-stdout-logs':
                 if val in ('true', 'false'):
-                    log_opts[key] = val == 'true'
+                    logging_opts[key] = val == 'true'
             case 'disable-rosout-logs':
                 if val in ('true', 'false'):
-                    log_opts[key] = val == 'true'
+                    logging_opts[key] = val == 'true'
             case 'disable-external-lib-logs':
                 if val in ('true', 'false'):
-                    log_opts[key] = val == 'true'
-            case _:  # Should never happen
-                # Custom logger levels
-                log_opts[key] = val
+                    logging_opts[key] = val == 'true'
+            # If it is not one of the known keys, it must be a custom logger level.
+            # A custom logger has the form 'logger_name=<level>'.
+            # Important, for a logger to apply correctly in the node, its name must be fully qualified with the node's
+            # namespace
+            case _:
+                if val in ('debug', 'info', 'warn', 'error', 'fatal'):
+                    dotted_namespace = dottify_namespace(namespace)
+                    # If key is the same as node_name, do not append it again.
+                    # For example, if dotted_namespace is 'myns.robot1', node_name is 'mynode' and key is 'mynode',
+                    # which means we want to set the level for the logger 'myns.robot1.mynode'. If we append key again,
+                    # we would get 'myns.robot1.mynode.mynode', which is incorrect.
+                    # If the key is different from node_name, we append it.
+                    # For example, if dotted_namespace is 'myns.robot1', node_name is 'mynode' and key is 'mylogger',
+                    # it means we want to set the level for the logger 'myns.robot1.mynode.mylogger'.
+                    logger = (
+                        '.'.join([dotted_namespace, node_name, key])
+                        if key != node_name
+                        else '.'.join([dotted_namespace, node_name])
+                    )
+                    logging_opts[logger] = val
 
-    # print(f'Log options dict: {log_opts}')
-    # print(f'ROS args: {to_ros_args(log_opts)}')
+    # print(f'Log options dict: {logging_opts}')
+    # print(f'ROS args: {to_ros_args(logging_opts)}')
 
-    return to_ros_args(log_opts)
+    return to_ros_args(logging_opts)
 
 
-def parse_cli_node_opts(cli_node_opts: Optional[str]) -> Dict[str, Union[str, bool, float]]:
+def process_node_options(cli_node_opts: Optional[str]) -> Dict[str, Union[str, bool, float]]:
     """
     Parse the CLI node options string into a dictionary.
     :param cli_node_opts: Key-value string for node options.
     :return: Dictionary with node options.
 
     Example
-    cli_node_opts="output=both,emulate_tty=True,respawn=True,respawn_delay=3.0"
+    cli_node_opts="name=,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0"
     output: {'output': 'both', 'emulate_tty': True, 'respawn': True, 'respawn_delay': 3.0}
     """
     node_opts: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
@@ -366,16 +591,123 @@ def parse_cli_node_opts(cli_node_opts: Optional[str]) -> Dict[str, Union[str, bo
     return node_opts
 
 
+def process_topic_remappings(cli_remappings: Optional[str]) -> Optional[List[Tuple[str, str]]]:
+    """
+    Parse the CLI remappings string into a list of (from, to) tuples.
+    :param cli_remappings: Key-value string for topic remappings.
+    :return: List of (from, to) tuples.
+
+    Example
+    cli_remappings="/a:=/b,/c:=d,e:=/f,g:=h"
+    ouput: [('/a', '/b'), ('/c', 'd'), ('e', '/f'), ('g', 'h')]
+    """
+
+    # If no CLI remappings are provided or not a string, return None.
+    if not isinstance(cli_remappings, str):
+        return None
+
+    cli_r = cli_remappings.strip()
+
+    # If the CLI remappings string is empty, return None.
+    if not cli_r:
+        return None
+
+    remappings: List[Tuple[str, str]] = []
+
+    for from_to in cli_r.split(','):
+        from_to = from_to.strip()
+
+        if not from_to:
+            continue
+
+        if ':=' not in from_to:
+            continue  # Ignore invalid remapping
+
+        from_expr, to_expr = from_to.split(':=', 1)
+
+        from_expr = from_expr.strip()
+        to_expr = to_expr.strip()
+
+        if not from_expr or not to_expr:
+            continue  # Ignore invalid remapping
+
+        remappings.append((from_expr, to_expr))
+
+    return remappings
+
+
+def read_yaml_file(yaml_file: str) -> Tuple[str, Any]:
+    """
+    Read and parse a YAML file, returning both the resolved path and the loaded object.
+
+    :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
+    :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be ``None``
+        when the file contains only comments/whitespace.
+    :raises ValueError: If the input path is invalid, the file cannot be found/read, or YAML syntax is invalid.
+    """
+    if not isinstance(yaml_file, str):
+        raise ValueError(f'YAML file must be a str (got: {type(yaml_file).__name__})')
+
+    yaml_file = yaml_file.strip()
+
+    if not yaml_file:
+        raise ValueError('YAML file not provided')
+
+    # Resolve URI formats (package://, file://) and expand '~' for regular filesystem paths.
+    try:
+        resolved_yaml_file = resolve_file(yaml_file)
+    except Exception as e:
+        raise ValueError(f"Failed to resolve YAML file '{yaml_file}': {e}") from e
+
+    resolved_yaml_path = Path(resolved_yaml_file)
+
+    if not resolved_yaml_path.is_file():
+        raise ValueError(f"File '{resolved_yaml_file}' does not exist")
+
+    try:
+        with resolved_yaml_path.open('r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML syntax in file '{resolved_yaml_file}': {e}") from e
+    except (OSError, UnicodeDecodeError) as e:
+        raise ValueError(f"Failed to read file '{resolved_yaml_file}': {e}") from e
+    except Exception as e:
+        raise ValueError(f"Unexpected error reading YAML file '{resolved_yaml_file}': {e}") from e
+
+    return (resolved_yaml_file, data)
+
+
+def read_yaml_mapping(yaml_file: str) -> Tuple[str, Dict[str, Any]]:
+    """
+    Load a YAML file and ensure the top-level document is a mapping, returning its resolved path and data.
+
+    :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
+    :return: Tuple '(resolved_path, mapping)' where 'mapping' is the parsed YAML dict.
+    :raises ValueError: If the file cannot be resolved/read, has invalid YAML, is empty, or the top-level
+        object is not a mapping.
+    """
+    resolved_yaml_file, data = read_yaml_file(yaml_file)
+
+    if data is None:
+        raise ValueError(f"File '{resolved_yaml_file}' is empty; expected a mapping")
+
+    if not isinstance(data, dict):
+        raise ValueError(f"File '{resolved_yaml_file}' must be a mapping. Got: '{type(data).__name__}'")
+
+    return resolved_yaml_file, data
+
+
 def resolve_file(file: Optional[str]) -> str:
-    resolved_file: str = ''
+    if file is None:
+        return ''
 
     if not isinstance(file, str):
-        return resolved_file
+        raise ValueError(f'File must be a string (got: {type(file).__name__})')
 
     file = file.strip()
 
     if not file:
-        return resolved_file
+        return ''
 
     if file.startswith('package://'):
         rest = file[len('package://') :]
@@ -387,292 +719,49 @@ def resolve_file(file: Optional[str]) -> str:
         # Raises 'PackageNotFoundError' if the package is not found.
         # Raises 'ValueError' if the package name is invalid.
         parent_path = get_package_share_directory(pkg)
-        resolved_file = os.path.join(parent_path, relative_file)
-    elif file.startswith('file://'):
+        return os.path.join(parent_path, relative_file)
+
+    if file.startswith('file://'):
         resolved_file = os.path.expanduser(file[len('file://') :])
 
         if not os.path.isabs(resolved_file):
             raise ValueError(f"File URI must point to an absolute path (got: '{resolved_file}')")
 
-    return resolved_file
+        return resolved_file
+
+    # If none of the special URI formats matched, return the original string with user expansion, if
+    # possible.
+    return os.path.expanduser(file)
 
 
-def validate_name(s: str) -> Optional[bool]:
-    """
-    Validate characters of a string segment.
+def _replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
+    if not isinstance(namespace, str):
+        raise ValueError('Namespace must be a string')
 
-    Returns:
-        - True  -> all characters are valid (ASCII alnum or underscore).
-        - False -> at least one invalid character found.
-        - None  -> input is empty; considered 'not evaluable' at this level.
+    if not isinstance(new_sep, str) or len(new_sep) != 1:
+        raise ValueError('New separator must be a single character string')
 
-    Notes:
-        - This function does not raise; it only reports.
-        - Policy decisions (e.g., whether empty is allowed) belong to the caller.
-    """
-    if not s:
-        return None
-
-    # Check all characters.
-    # Valid characters are ASCII alphanumeric or underscore.
-    # If any other character is found, return False.
-    return all((c == '_') or (c.isascii() and c.isalnum()) for c in s)
-
-
-def validate_namespace(ns: str) -> None:
-    """
-    Validate a namespace string.
-
-    Rules:
-    - '' and '/' are permitted as special cases (root/empty).
-    - Reject empty segments (no '//' allowed after trimming one leading and one trailing slash).
-    - Each non-empty segment must pass validate_string(...)=True.
-    """
-    if ns in ('', '/'):
-        return
-
-    # In order to check if there are two or more '/' in a row, we need to first remove the leading and trailing slashes
-    # if present.
-
-    # Remove exactly one leading slash.
-    if ns.startswith('/'):
-        ns = ns[1:]
-
-    # Remove exactly one trailing slash.
-    if ns.endswith('/'):
-        ns = ns[:-1]
-
-    parts = ns.split('/') if ns else []
-
-    for seg in parts:
-        # Empty segments are not allowed by policy here.
-        if seg == '':
-            raise ValueError("Consecutive '/' are not allowed in a namespace")
-
-        seg_validity = validate_name(seg)
-
-        if seg_validity is False:
-            raise ValueError('Namespace segments must be ASCII [A-Za-z0-9_] only')
-
-        # if argument pass to validate_name is None or empty string, then None is returned, as a modd to say,
-        # 'it is not valid, it is not invalid, it was not validated'.
-
-        # seg_validity cannot be None here because seg != '' by guard above, but we keep a defensive check , just
-        # in case of future changes.
-        if seg_validity is None:
-            raise ValueError('Internal: unexpected empty segment during validation')
-
-
-# ------------------------------------------------------------------------------
-# Opaque functions.
-# ------------------------------------------------------------------------------
-
-
-def set_global_namespace(ctx: LaunchContext, namespace_key: str = 'namespace') -> list[LaunchDescriptionEntity]:
-    """
-    Normalize and validate LaunchConfiguration(namespace_key) to a global form.
-
-    Semantics:
-    - ''  -> '/'
-    - '/' -> '/'
-    - 'ns', '/ns', 'ns/', '/ns/' -> '/ns'
-    - Reject spaces, consecutive '/', and non [A-Za-z0-9_] chars in segments.
-
-    Returns a list with a SetLaunchConfiguration when it must update the value;
-    otherwise returns an empty list if no change is required.
-    """
-    ns = LaunchConfiguration(namespace_key).perform(ctx)
-
-    # Empty becomes root '/'
-    if ns == '':
-        return [SetLaunchConfiguration(namespace_key, '/')]
-
-    # Already root
-    if ns == '/':
-        return []
-
-    # A namespace should not end in a '/'; it is not an error if the namespace ends with a '/', but it is convenient to
-    # to remove if it is present '/'.
-    ns_norm = ns[:-1] if ns.endswith('/') else ns
-
-    # A global namespace must start with a '/'.
-    if not ns_norm.startswith('/'):
-        ns_norm = '/' + ns_norm
-
-    validate_namespace(ns_norm)
-
-    return [SetLaunchConfiguration(namespace_key, ns_norm)]
-
-def set_robot_namespace(
-    ctx: LaunchContext, namespace_key: str = 'namespace', robot_name_key: str = 'robot_name'
-) -> list[LaunchDescriptionEntity]:
-    """
-    Sets the action SetLaunchConfiguration('robot_namespace', <value>), where the key 'robot_namespace' is the
-    concatenation of namespace + '/' + robot_name.
-
-    Examples
-        return LaunchDescription(
-            [
-                ...
-                set_robot_namespace(ctx, kwargs={'namespace_key': 'ns', 'robot_name_key': 'rn'}),
-                LogInfo(msg=['Robot namespace: ', LaunchConfiguration('robot_namespace')])
-                ...
-            ]
-        )
-    """
-    # The 'robot_namespace' is the concatenation of the 'namespace' and the 'robot_name', using the character '/' a
-    # separtor.
-    # namespace=''          -> robot_namespace = robot_name
-    # namespace='/'         -> robot_namespace = '/' + robot_name
-    # namespace='ns'        -> robot_namespace = 'ns' + '/' + robot_name
-    # namespace='ns/'       -> robot_namespace = 'ns' + '/' + robot_name
-    # namespace='/ns/'      -> robot_namespace = '/ns' + '/' + robot_name
-    # namespace='/ns1/ns2'  -> robot_namespace = '/ns1/ns2' + '/' + robot_name
-    # namespace='/ns1/ns2/' -> robot_namespace = '/ns1/ns2' + '/' + robot_name
-
-    namespace = LaunchConfiguration(namespace_key).perform(ctx)
-    robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-
-    # No need to check if robot_name is None, since 'perform' can't return None.
-
-    # Remove extra white spaces at the beginning and the end of the robot's name.
-    robot_name = robot_name.strip()
-
-    if not robot_name:
-        raise RuntimeError(f"'{robot_name_key}' must be a non-empty string")
-
-    # robot_name is a non-empty string here, ok!.
-
+    # No conversion happens for these cases.
+    # '' -> ''
+    # '/' -> ''
     if namespace in ('', '/'):
-        return [SetLaunchConfiguration('robot_namespace', namespace + robot_name)]
+        return ''
 
-    # A namespace should not end in a '/', it is not an error if the namespace ends with a '/', but it is convenient to
-    # to remove if it is present '/'.
-    namespace = namespace[:-1] if namespace.endswith('/') else namespace
+    namespace_is_valid, error_msg = is_valid_namespace(namespace)
 
-    validate_namespace(namespace)
+    if not namespace_is_valid:
+        raise RuntimeError(f"Invalid namespace '{namespace}': {error_msg}")
 
-    # If the execution flow gets here, then the namespace is valid too.
-    # Note: The namespace does not end in '/', but it can or cannot start with '/', since this is a point we do not
-    # enforce here.
+    # Now that we know the namespace is valid, we transform the '/' separators into '<new_sep>' separators.
+    # Be aware that, leading and trailing '/' are removed in the process.
 
-    return [SetLaunchConfiguration('robot_namespace', namespace + '/' + robot_name)]
+    # If we consider <c> as the new separator, for the sake of the examples:
+    # namespace=''          -> ''
+    # namespace='/'         -> ''
+    # namespace='ns'        -> ns
+    # namespace='ns/'       -> ns
+    # namespace='/ns/'      -> ns
+    # namespace='/ns1/ns2'  -> ns1<c>ns2
+    # namespace='/ns1/ns2/' -> ns1<c>ns2
 
-
-def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> list[LaunchDescriptionEntity]:
-    robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-
-    # No need to check if robot_name is None, since 'perform' can't return None.
-
-    # Remove extra white spaces at the beginning and the end of the robot's name.
-    robot_name = robot_name.strip()
-
-    if not robot_name:
-        raise RuntimeError(f"'{robot_name_key}' must be a non-empty string")
-
-    # robot_name is a non-empty string here, ok!.
-
-    return [SetLaunchConfiguration('robot_prefix', f'{robot_name}_')]
-
-
-# @dataclass
-# class HelpContext:
-#     parameters: SomeParameters
-#     remappings: List[Tuple[str, str]]
-#     node_opts: Dict[str, Union[str, bool, float]]
-#     ros_arguments: str
-
-
-#     node_options_desc = (
-#         'key-value string, like "output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
-#         f'Optional (default: "{_default_node_options_str()}")'
-#     )
-
-
-# def declare_std_launch_arguments(default_node_name: str = '') -> List[LaunchDescriptionEntity]:
-#     """
-#     Declare standard launch arguments for a ROS2 node.
-#     :param default_node_name: Default name for the node (optional, default: '').
-#     :return: List of launch description entities.
-
-#     The standard launch arguments are:
-#     - use_sim_time: Whether to use simulation time (default: False).
-#     - namespace: ROS namespace (optional, default: '').
-#     - node_name: Name for the node (default: provided by the caller, or '').
-#     - params_file: Base YAML file with ros__parameters (required).
-#     - overlay_params_file_list: Comma-separated list of YAML overlay files (optional, default: '').
-#     - remappings: Key-value string for topic remappings (optional, default: '').
-#     - log_options: Key-value string for ROS logging options (optional, default: see below).
-#     - node_options: Key-value string for node options (optional, default: see below).
-#     """
-#     remappings_desc = (
-#         'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h". Remappings passed by CLI have highest'
-#         'precedence. Optional (default: "")'
-#     )
-#     # log-level: The default log level for the node. One of: debug, info, warn, error.
-#     # disable-stdout-logs: Whether to disable writing log messages to the console.
-#     # disable-rosout-logs: Whether to disable writing log messages out to /rosout. This can significantly save on
-#     #                      network bandwidth, but external observers will not be able to monitor logging.
-#     # disable-external-lib-logs: Whether to completely disable the use of an external logger. This may be faster in
-#        some cases, but means that logs will not be written to disk
-#     log_options_desc = (
-#         'key-value string, like "log-level=info,log-config-file=/path/to/loggers.conf,'
-#         'disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,logger1_name=<level>,'
-#         f'logger2_name=<level>". Optional (default: "{_default_log_options_str()}")'
-#     )
-
-#     node_options_desc = (
-#         'key-value string, like "output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
-#         f'Optional (default: "{_default_node_options_str()}")'
-#     )
-
-#     return [
-#         DeclareLaunchArgument(
-#             'use_sim_time',
-#             default_value='False',
-#             choices=['True', 'true', 'False', 'false'],
-#             description='Use simulation clock if true',
-#         ),
-#         DeclareLaunchArgument('namespace', default_value='', description='ROS namespace (optional, default: "")'),
-#         DeclareLaunchArgument('node_name', default_value=default_node_name, description='Name for the node'),
-#         DeclareLaunchArgument('params_file', description='Base YAML with ros__parameters'),
-#         DeclareLaunchArgument(
-#             'overlay_params_file_list',
-#             default_value='',
-#             description='Comma-separated list of YAML overlays (applied in order; last wins).',
-#         ),
-#         # Order of precedence for remappings (highest to lowest): CLI remappings > ros_args -r > capsule remappings.
-#         DeclareLaunchArgument('remappings', default_value='', description=remappings_desc),
-#         DeclareLaunchArgument('log_options', default_value=DEFAULT_LOG_OPTIONS, description=log_options_desc),
-#         # Order of precedence for node_options (highest to lowest): CLI node_options > capsule node_options.
-#         DeclareLaunchArgument('node_options', default_value=DEFAULT_NODE_OPTIONS, description=node_options_desc),
-#     ]
-
-
-# def get_help_context(context: LaunchContext) -> HelpContext:
-#     return HelpContext(
-#         parameters=_get_parameters(
-#             LaunchConfiguration('params_file').perform(context),
-#             LaunchConfiguration('overlay_params_file_list').perform(context),
-#         ),
-#         remappings=_parse_cli_remappings(LaunchConfiguration('remappings').perform(context)),
-#         node_opts=_parse_cli_node_opts(LaunchConfiguration('node_options').perform(context)),
-#         ros_arguments=_parse_cli_log_opts(LaunchConfiguration('log_options').perform(context)),
-#     )
-
-
-# def pretty_print(help_context: HelpContext):
-#     print('Parameters:')
-#     for p in help_context.parameters:
-#         print(f'  {p}')
-
-#     print('Remappings:')
-#     for f, t in help_context.remappings:
-#         print(f'  {f} -> {t}')
-
-#     print('Node options:')
-#     for k, v in help_context.node_opts.items():
-#         print(f'  {k}: {v}')
-
-#     print('ROS arguments:')
-#     print(f'  {help_context.ros_arguments}')
+    return namespace.strip('/').replace('/', new_sep)

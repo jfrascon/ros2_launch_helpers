@@ -18,8 +18,8 @@ In a typical launch file, you can import and use the helpers like this:
 ```python
 import ros2_launch_helpers as rlh
 
-DeclareLaunchArgument('remappings', default_value='', description=rlh.REMAPPINGS_DESC)
-DeclareLaunchArgument('log_options', default_value=rlh.default_log_options_str(), description=rlh.LOG_OPTIONS_DESC)
+DeclareLaunchArgument('remappings', default_value='', description=rlh.TOPIC_REMAPPINGS_DESC)
+DeclareLaunchArgument('logging_options', default_value=rlh.default_logging_options_str(), description=rlh.LOGGING_OPTIONS_DESC)
 DeclareLaunchArgument('node_options', default_value=rlh.default_node_options_str(), description=rlh.NODE_OPTIONS_DESC)
 
 parameters = rlh.get_parameters(params_file, overlay_params_file_list)
