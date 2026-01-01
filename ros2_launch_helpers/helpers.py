@@ -19,8 +19,8 @@ DEFAULT_LOGGING_OPTIONS = {
 }
 
 
-def default_logging_options_str() -> str:
-    return ','.join(f'{k}={v}' for k, v in DEFAULT_LOGGING_OPTIONS.items())
+def default_logging_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
+    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_LOGGING_OPTIONS.items())
 
 
 LOGGING_OPTIONS_DESC = (
@@ -37,8 +37,8 @@ DEFAULT_NODE_OPTIONS = {
 }
 
 
-def default_node_options_str() -> str:
-    return ','.join(f'{k}={v}' for k, v in DEFAULT_NODE_OPTIONS.items())
+def default_node_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
+    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_NODE_OPTIONS.items())
 
 
 NODE_OPTIONS_DESC = (
