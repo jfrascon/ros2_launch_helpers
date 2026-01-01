@@ -254,20 +254,29 @@ def is_valid_name(s: str) -> bool:
     Validate characters of a string segment.
 
     Returns:
-        - True  -> all characters are valid (ASCII alnum or underscore).
+        - True  -> all characters are valid (ASCII alnum or underscore) and length is valid.
         - False -> at least one invalid character found.
         - None  -> input is empty; considered 'not evaluable' at this level.
 
     Notes:
         - This function does not raise; it only reports.
         - Policy decisions (e.g., whether empty is allowed) belong to the caller.
+        - Rules match ROS 2 node name validation (Humble):
+          https://github.com/ros2/rmw/blob/humble/rmw/src/validate_node_name.c
+          https://github.com/ros2/rclpy/blob/humble/rclpy/src/rclpy/names.cpp
     """
     if not isinstance(s, str):
         return False
 
-    s = s.strip()
-
     if not s:
+        return False
+
+    # ROS 2 node name max length.
+    if len(s) > 255:
+        return False
+
+    # Must not start with a number.
+    if s[0].isdigit():
         return False
 
     # Check all characters.
