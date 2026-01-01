@@ -523,71 +523,74 @@ def process_logging_options(
     return to_ros_args(logging_options)
 
 
-def process_node_options(cli_node_opts: Optional[str]) -> Dict[str, Union[str, bool, float]]:
+def process_node_options(
+    node_options_kvs: Optional[str], item_sep: str = ',', key_value_sep: str = '='
+) -> Dict[str, Union[str, bool, float]]:
     """
-    Parse the CLI node options string into a dictionary.
-    :param cli_node_opts: Key-value string for node options.
+    Parse the node options string into a dictionary.
+    :param node_options_kvs: Key-value string for node options.
     :return: Dictionary with node options.
 
     Example
-    cli_node_opts="name=,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0"
-    output: {'output': 'both', 'emulate_tty': True, 'respawn': True, 'respawn_delay': 3.0}
+    node_options_kvs="name=<any_name>,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0"
+    output: {'name': <any_name>, 'output': 'both', 'emulate_tty': True, 'respawn': True, 'respawn_delay': 3.0}
     """
-    node_opts: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
+    node_options: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
 
-    # If no CLI node options are provided or not a string, return the default node options.
-    if not isinstance(cli_node_opts, str):
-        return node_opts
+    # If node_options_kvs is not a string, return the default node options.
+    if not isinstance(node_options_kvs, str):
+        return node_options
 
-    cli_n_o = cli_node_opts.strip()
+    # If the node_options_kvs is empty, return the default node options.
+    node_options_kvs = node_options_kvs.strip()
 
-    # If the CLI node options string is empty, return the default node options.
-    if not cli_n_o:
-        return node_opts
+    if not node_options_kvs:
+        return node_options
 
-    for node_opt in cli_n_o.split(','):
-        node_opt = node_opt.strip()
+    # Iterate over each key-value pair in the node options string, processing only known keys.
+    for node_option in node_options_kvs.split(item_sep):
+        node_option = node_option.strip()
 
-        if not node_opt or '=' not in node_opt:
+        # If the element between separators is empty or does not contain the key-value separator, skip it.
+        if not node_option or key_value_sep not in node_option:
             continue
 
-        key, val = node_opt.split('=', 1)
+        key, val = node_option.split(key_value_sep, 1)
 
+        # Remove leading and trailing spaces and convert to lower case for easier comparison.
         key = key.strip().lower()
         val = val.strip().lower()
 
+        # If no key is provided or the key is not known, skip it.
         if not key or key not in DEFAULT_NODE_OPTIONS:
             continue
 
+        # Process known keys.
         match key:
             case 'name':
-                if (
-                    val
-                    and val != 'none'
-                    and val != 'null'
-                    and val != 'undefined'
-                    and val != 'unknown'
-                    and val != 'default'
-                ):
-                    node_opts[key] = val
+                # If the key is 'name', accept any non-empty value that is not 'default'.
+                # If 'name' is empty or 'default', the value associated with 'name' is empty, which means the node
+                # will use its default name.
+                if val and val != 'default':
+                    node_options[key] = val
             case 'output':
                 if val in ('screen', 'log', 'both'):
-                    node_opts[key] = val
+                    node_options[key] = val
             case 'emulate_tty':
                 if val in ('true', 'false'):
-                    node_opts[key] = val == 'true'
+                    node_options[key] = val == 'true'
             case 'respawn':
                 if val in ('true', 'false'):
-                    node_opts[key] = val == 'true'
+                    node_options[key] = val == 'true'
             case 'respawn_delay':
                 try:
-                    node_opts[key] = float(val)
+                    node_options[key] = float(val)
                 except Exception as e:
                     raise ValueError(f"Invalid value for 'respawn_delay': '{val}'") from e
             case _:  # Should never happen
                 pass
 
-    return node_opts
+    return node_options
 
 
 def process_topic_remappings(cli_remappings: Optional[str]) -> Optional[List[Tuple[str, str]]]:
