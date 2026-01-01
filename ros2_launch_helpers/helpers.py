@@ -423,25 +423,27 @@ def merge_yaml_maps_strict(
     return nested, applied, ignored
 
 
-def process_logging_options(logging_options: Optional[str], namespace: str, node_name: str) -> List[str]:
+def process_logging_options(
+    logging_options_kvs: Optional[str], item_sep: str = ',', key_value_sep: str = '='
+) -> List[str]:
     """
-    Parse the CLI log options string into a ROS arguments string.
-    :param logging_options: Key-value string for ROS logging options.
+    Parse the log options string into a ROS arguments string.
+    :param logging_options_kvs: Key-value string for ROS logging options.
     :return: ROS arguments string.
 
     Reference: https://docs.ros.org/en/rolling/Tutorials/Demos/Logging-and-logger-configuration.html
 
     Example
-    logging_options="log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,
+    logging_options_kvs="log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,
                   logger1_name=<level>,logger2_name=<level>"
     output: [--log-level, info, --disable-stdout-logs, --disable-rosout-logs, --disable-external-lib-logs, --logger,
              logger1_name=<level>, --logger, logger2_name=<level>]
     """
 
-    def to_ros_args(logging_opts: Dict[str, Any]) -> List[str]:
+    def to_ros_args(logging_options: Dict[str, Any]) -> List[str]:
         args = []
 
-        for k, v in logging_opts.items():
+        for k, v in logging_options.items():
             if k == 'log-level':
                 v = v.strip()
                 if v:
@@ -453,35 +455,35 @@ def process_logging_options(logging_options: Optional[str], namespace: str, node
             else:
                 v = v.strip()
                 if v:
-                    args.extend(['--log-level', f'{k}:={v}'])
+                    args.extend(['--log-level', f'{k}:={v}'])  # Note the ':=' separator for custom loggers.
 
         return args
 
-    # Passing default values to 'logging_opts', so:
+    # Passing default values to 'logging_options', so:
     # - In case a key is missing, it gets the default value.
-    # - In case 'logging_options' is empty, we use the default log options.
-    logging_opts: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
+    # - In case 'logging_options_kvs' is empty, we use the default log options.
+    logging_options: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
 
-    # If no CLI log options are provided, return the default log options as ROS args.
-    if not isinstance(logging_options, str):
-        return to_ros_args(logging_opts)
+    # If no log options are provided, return the default log options as ROS args.
+    if not isinstance(logging_options_kvs, str):
+        return to_ros_args(logging_options)
 
-    logging_options = logging_options.strip()
+    logging_options_kvs = logging_options_kvs.strip()
 
-    # If the CLI log options string is empty, return the default log options as ROS args.
-    if not logging_options:
-        return to_ros_args(logging_opts)
+    # If the logging options string is empty, return the default logging options as ROS args.
+    if not logging_options_kvs:
+        return to_ros_args(logging_options)
 
     # Iterate over each key-value pair in the log options string.
-    for logging_option in logging_options.split(','):
+    for logging_option in logging_options_kvs.split(item_sep):
         logging_option = logging_option.strip()
 
-        # If the element between commas is empty or does not contain '=', skip it.
-        if not logging_option or '=' not in logging_option:
+        # If the element between the item separators is empty or does not contain the key-value separator, skip it.
+        if not logging_option or key_value_sep not in logging_option:
             continue
 
-        # Split only on the first '='. It should be key=value, but value could contain '='.
-        key, val = logging_option.split('=', 1)
+        # Split only on the first occurrence of the key-value separator.
+        key, val = logging_option.split(key_value_sep, 1)
 
         # Strip leading and trailing spaces.
         # Key must be passed as is (case-sensitive), but we allow values to be case-insensitive, so we convert them to
@@ -496,41 +498,29 @@ def process_logging_options(logging_options: Optional[str], namespace: str, node
         match key:
             case 'log-level':
                 if val in ('debug', 'info', 'warn', 'error'):
-                    logging_opts[key] = val
+                    logging_options[key] = val
             case 'disable-stdout-logs':
                 if val in ('true', 'false'):
-                    logging_opts[key] = val == 'true'
+                    logging_options[key] = val == 'true'
             case 'disable-rosout-logs':
                 if val in ('true', 'false'):
-                    logging_opts[key] = val == 'true'
+                    logging_options[key] = val == 'true'
             case 'disable-external-lib-logs':
                 if val in ('true', 'false'):
-                    logging_opts[key] = val == 'true'
+                    logging_options[key] = val == 'true'
             # If it is not one of the known keys, it must be a custom logger level.
             # A custom logger has the form 'logger_name=<level>'.
             # Important, for a logger to apply correctly in the node, its name must be fully qualified with the node's
             # namespace
             case _:
                 if val in ('debug', 'info', 'warn', 'error', 'fatal'):
-                    dotted_namespace = dottify_namespace(namespace)
-                    # If key is the same as node_name, do not append it again.
-                    # For example, if dotted_namespace is 'myns.robot1', node_name is 'mynode' and key is 'mynode',
-                    # which means we want to set the level for the logger 'myns.robot1.mynode'. If we append key again,
-                    # we would get 'myns.robot1.mynode.mynode', which is incorrect.
-                    # If the key is different from node_name, we append it.
-                    # For example, if dotted_namespace is 'myns.robot1', node_name is 'mynode' and key is 'mylogger',
-                    # it means we want to set the level for the logger 'myns.robot1.mynode.mylogger'.
-                    logger = (
-                        '.'.join([dotted_namespace, node_name, key])
-                        if key != node_name
-                        else '.'.join([dotted_namespace, node_name])
-                    )
-                    logging_opts[logger] = val
+                    # key is the logger name, val is the log level.
+                    logging_options[key] = val
 
-    # print(f'Log options dict: {logging_opts}')
-    # print(f'ROS args: {to_ros_args(logging_opts)}')
+    # print(f'Log options dict: {logging_options}')
+    # print(f'ROS args: {to_ros_args(logging_options)}')
 
-    return to_ros_args(logging_opts)
+    return to_ros_args(logging_options)
 
 
 def process_node_options(cli_node_opts: Optional[str]) -> Dict[str, Union[str, bool, float]]:
