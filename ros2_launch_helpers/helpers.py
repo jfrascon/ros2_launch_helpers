@@ -593,49 +593,53 @@ def process_node_options(
     return node_options
 
 
-def process_topic_remappings(cli_remappings: Optional[str]) -> Optional[List[Tuple[str, str]]]:
+def process_topic_remappings(
+    topic_remappings_kvs: Optional[str], item_sep: str = ',', topic_remapping_sep: str = ':='
+) -> Optional[List[Tuple[str, str]]]:
     """
-    Parse the CLI remappings string into a list of (from, to) tuples.
-    :param cli_remappings: Key-value string for topic remappings.
+    Parse the topic remappings string into a list of (from, to) tuples.
+    :param topic_remappings_kvs: Key-value string for topic remappings.
     :return: List of (from, to) tuples.
 
     Example
-    cli_remappings="/a:=/b,/c:=d,e:=/f,g:=h"
+    topic_remappings_kvs="/a:=/b,/c:=d,e:=/f,g:=h"
     ouput: [('/a', '/b'), ('/c', 'd'), ('e', '/f'), ('g', 'h')]
     """
 
-    # If no CLI remappings are provided or not a string, return None.
-    if not isinstance(cli_remappings, str):
+    # If topic_remappings_kvs is not a string, return None.
+    if not isinstance(topic_remappings_kvs, str):
         return None
 
-    cli_r = cli_remappings.strip()
+    topic_remappings_kvs = topic_remappings_kvs.strip()
 
-    # If the CLI remappings string is empty, return None.
-    if not cli_r:
+    # If the topic_remappings_kvs string is empty, return None.
+    if not topic_remappings_kvs:
         return None
 
-    remappings: List[Tuple[str, str]] = []
+    topic_remappings: List[Tuple[str, str]] = []
 
-    for from_to in cli_r.split(','):
-        from_to = from_to.strip()
+    for topic_remapping in topic_remappings_kvs.split(item_sep):
+        topic_remapping = topic_remapping.strip()
 
-        if not from_to:
+        # If the element between commas is empty, skip it.
+        if not topic_remapping:
             continue
 
-        if ':=' not in from_to:
+        if topic_remapping_sep not in topic_remapping:
+            continue  # Ignore invalid topic remapping
+
+        original_topic, new_topic = topic_remapping.split(topic_remapping_sep, 1)
+
+        original_topic = original_topic.strip()
+        new_topic = new_topic.strip()
+
+        # If the original or new topic is empty, skip it.
+        if not original_topic or not new_topic:
             continue  # Ignore invalid remapping
 
-        from_expr, to_expr = from_to.split(':=', 1)
+        topic_remappings.append((original_topic, new_topic))
 
-        from_expr = from_expr.strip()
-        to_expr = to_expr.strip()
-
-        if not from_expr or not to_expr:
-            continue  # Ignore invalid remapping
-
-        remappings.append((from_expr, to_expr))
-
-    return remappings
+    return topic_remappings
 
 
 def read_yaml_file(yaml_file: str) -> Tuple[str, Any]:
