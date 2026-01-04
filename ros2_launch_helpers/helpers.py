@@ -108,12 +108,8 @@ def create_global_namespace(namespace: str) -> str:
 
     namespace = namespace.strip()
 
-    # Empty namespace becomes root '/'.
-    if namespace == '':
-        return '/'
-
-    # Already root.
-    if namespace == '/':
+    # Empty namespace becomes root '/' and so does '/'.
+    if namespace in ('', '/'):
         return '/'
 
     # A namespace should not end in a '/'; remove any trailing '/' to normalize.
