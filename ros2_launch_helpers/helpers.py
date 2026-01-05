@@ -1,11 +1,11 @@
-import numbers
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from benedict import benedict
+
+# from benedict import benedict
 from launch import LaunchContext, LaunchDescriptionEntity
 from launch.actions import SetLaunchConfiguration
 from launch.substitutions import LaunchConfiguration
@@ -333,88 +333,88 @@ def is_valid_namespace(ns: str) -> Tuple[bool, str]:
     return (True, '')
 
 
-def merge_yaml_maps_strict(
-    defaults: Mapping[str, Any],
-    override: Mapping[str, Any],
-    keypath_sep: str = '§',
-    flat_sep: str = '.',
-    allow_none: bool = True,
-    numeric_compat: bool = False,
-) -> Tuple[Dict[str, Any], List, List]:
-    def same_type(a, b, numeric_compat: bool = False) -> bool:
-        """
-        Return True if 'b' is allowed to override 'a' according to type rules.
+# def merge_yaml_maps_strict(
+#     defaults: Mapping[str, Any],
+#     override: Mapping[str, Any],
+#     keypath_sep: str = '§',
+#     flat_sep: str = '.',
+#     allow_none: bool = True,
+#     numeric_compat: bool = False,
+# ) -> Tuple[Dict[str, Any], List, List]:
+#     def same_type(a, b, numeric_compat: bool = False) -> bool:
+#         """
+#         Return True if 'b' is allowed to override 'a' according to type rules.
 
-        Rules:
-        1) Exact type match passes (type(a) is type(b)).
-        2) If numeric_compat is True, allow int <-> float interchange,
-            but never allow bool (since bool is a subclass of int in Python).
-        3) Otherwise, types must match exactly.
+#         Rules:
+#         1) Exact type match passes (type(a) is type(b)).
+#         2) If numeric_compat is True, allow int <-> float interchange,
+#             but never allow bool (since bool is a subclass of int in Python).
+#         3) Otherwise, types must match exactly.
 
-        Examples:
-        same_type(3, 7) -> True
-        same_type(3, 7.0) -> False
-        same_type(3, 7.0, numeric_compat=True) -> True
-        same_type(True, 1, numeric_compat=True) -> False  # bool explicitly excluded
-        same_type([1], [2]) -> True
-        same_type([1], "x") -> False
-        """
-        if type(a) is type(b):
-            return True
+#         Examples:
+#         same_type(3, 7) -> True
+#         same_type(3, 7.0) -> False
+#         same_type(3, 7.0, numeric_compat=True) -> True
+#         same_type(True, 1, numeric_compat=True) -> False  # bool explicitly excluded
+#         same_type([1], [2]) -> True
+#         same_type([1], "x") -> False
+#         """
+#         if type(a) is type(b):
+#             return True
 
-        # Optional numeric compatibility (int <-> float), but exclude bool explicitly.
-        # 'numbers.Real' captures int and float and bool, so we must filter bool out.
-        if numeric_compat and isinstance(a, numbers.Real) and isinstance(b, numbers.Real):
-            return not isinstance(a, bool) and not isinstance(b, bool)
+#         # Optional numeric compatibility (int <-> float), but exclude bool explicitly.
+#         # 'numbers.Real' captures int and float and bool, so we must filter bool out.
+#         if numeric_compat and isinstance(a, numbers.Real) and isinstance(b, numbers.Real):
+#             return not isinstance(a, bool) and not isinstance(b, bool)
 
-        # All other combinations are not allowed.
-        return False
+#         # All other combinations are not allowed.
+#         return False
 
-    # Wrap with benedict using a keypath separator that doesn't appear in keys
-    d = benedict(defaults, keypath_separator=keypath_sep)
-    o = benedict(override, keypath_separator=keypath_sep)
+#     # Wrap with benedict using a keypath separator that doesn't appear in keys
+#     d = benedict(defaults, keypath_separator=keypath_sep)
+#     o = benedict(override, keypath_separator=keypath_sep)
 
-    # Flatten both with dotted paths (independent from keypath sep)
-    d_flatten = d.flatten(flat_sep)
-    o_flatten = o.flatten(flat_sep)
+#     # Flatten both with dotted paths (independent from keypath sep)
+#     d_flatten = d.flatten(flat_sep)
+#     o_flatten = o.flatten(flat_sep)
 
-    merged_flat = {}
-    applied = []
-    ignored = []
+#     merged_flat = {}
+#     applied = []
+#     ignored = []
 
-    # Walk only default keys -> overlay strict
-    for dk, dv in d_flatten.items():
-        if dk in o_flatten:
-            ov = o_flatten[dk]
-            # Allow None values if specified
-            if ov is None:
-                if allow_none:
-                    merged_flat[dk] = None
-                    applied.append(dk)
-                else:
-                    # Treat None as 'missing override': inherit default and record as ignored
-                    merged_flat[dk] = dv
-                    ignored.append(dk)
-                continue
+#     # Walk only default keys -> overlay strict
+#     for dk, dv in d_flatten.items():
+#         if dk in o_flatten:
+#             ov = o_flatten[dk]
+#             # Allow None values if specified
+#             if ov is None:
+#                 if allow_none:
+#                     merged_flat[dk] = None
+#                     applied.append(dk)
+#                 else:
+#                     # Treat None as 'missing override': inherit default and record as ignored
+#                     merged_flat[dk] = dv
+#                     ignored.append(dk)
+#                 continue
 
-            if not same_type(dv, ov, numeric_compat):
-                raise TypeError(f'{dk}: type mismatch (default={type(dv).__name__}, override={type(ov).__name__})')
+#             if not same_type(dv, ov, numeric_compat):
+#                 raise TypeError(f'{dk}: type mismatch (default={type(dv).__name__}, override={type(ov).__name__})')
 
-            # Lists replace lists; scalars replace scalars – both covered by type check
-            merged_flat[dk] = ov
-            applied.append(dk)
-        else:
-            merged_flat[dk] = dv
+#             # Lists replace lists; scalars replace scalars – both covered by type check
+#             merged_flat[dk] = ov
+#             applied.append(dk)
+#         else:
+#             merged_flat[dk] = dv
 
-    # Collect extras from override (ignored by design)
-    for ok in o_flatten.keys():
-        if ok not in d_flatten:
-            ignored.append(ok)
+#     # Collect extras from override (ignored by design)
+#     for ok in o_flatten.keys():
+#         if ok not in d_flatten:
+#             ignored.append(ok)
 
-    # Rebuild nested dict
-    nested = benedict(merged_flat, keypath_separator=keypath_sep).unflatten(separator=flat_sep)
+#     # Rebuild nested dict
+#     nested = benedict(merged_flat, keypath_separator=keypath_sep).unflatten(separator=flat_sep)
 
-    return nested, applied, ignored
+#     return nested, applied, ignored
 
 
 def process_logging_options(
@@ -688,7 +688,7 @@ def read_yaml_mapping(yaml_file: str) -> Tuple[str, Optional[Dict[str, Any]]]:
     """
     resolved_yaml_file, data = read_yaml_file(yaml_file)
 
-    if not isinstance(data, dict): # Top-level YAML object must be a mapping
+    if not isinstance(data, dict):  # Top-level YAML object must be a mapping
         raise ValueError(f"File '{resolved_yaml_file}' must be a mapping. Got: '{type(data).__name__}'")
 
     # If file is empty or contains only comments/whitespace, 'data' is None.
