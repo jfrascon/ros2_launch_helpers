@@ -255,8 +255,6 @@ def is_valid_name(s: str) -> bool:
         - None  -> input is empty; considered 'not evaluable' at this level.
 
     Notes:
-        - This function does not raise; it only reports.
-        - Policy decisions (e.g., whether empty is allowed) belong to the caller.
         - Rules match ROS 2 node name validation (Humble):
           https://github.com/ros2/rmw/blob/humble/rmw/src/validate_node_name.c
           https://github.com/ros2/rclpy/blob/humble/rclpy/src/rclpy/names.cpp
@@ -679,7 +677,7 @@ def read_yaml_file(yaml_file: str) -> Tuple[str, Any]:
     return (resolved_yaml_file, data)
 
 
-def read_yaml_mapping(yaml_file: str) -> Tuple[str, Dict[str, Any]]:
+def read_yaml_mapping(yaml_file: str) -> Tuple[str, Optional[Dict[str, Any]]]:
     """
     Load a YAML file and ensure the top-level document is a mapping, returning its resolved path and data.
 
@@ -690,13 +688,12 @@ def read_yaml_mapping(yaml_file: str) -> Tuple[str, Dict[str, Any]]:
     """
     resolved_yaml_file, data = read_yaml_file(yaml_file)
 
-    if data is None:
-        raise ValueError(f"File '{resolved_yaml_file}' is empty; expected a mapping")
-
-    if not isinstance(data, dict):
+    if not isinstance(data, dict): # Top-level YAML object must be a mapping
         raise ValueError(f"File '{resolved_yaml_file}' must be a mapping. Got: '{type(data).__name__}'")
 
-    return resolved_yaml_file, data
+    # If file is empty or contains only comments/whitespace, 'data' is None.
+    # If file contains {}, 'data' is an empty dict.
+    return (resolved_yaml_file, data)
 
 
 def resolve_file(file: Optional[str]) -> str:
