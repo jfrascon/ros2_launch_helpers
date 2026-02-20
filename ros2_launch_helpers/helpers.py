@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 
 # from benedict import benedict
 from launch import LaunchContext, LaunchDescriptionEntity
-from launch.actions import SetLaunchConfiguration
+from launch.actions import LogInfo, SetLaunchConfiguration
 from launch.substitutions import LaunchConfiguration
 from launch_ros.parameter_descriptions import ParameterFile
 
@@ -210,6 +210,24 @@ def underscorify_namespace(namespace: str) -> str:
     :return: Underscore-separated namespace string.
     """
     return _replace_separator_in_namespace(namespace, '_')
+
+
+def to_log_info_entities(messages: List[str]) -> List[LaunchDescriptionEntity]:
+    """
+    Convert a list of text messages into launch LogInfo entities.
+
+    Empty messages are ignored.
+    """
+    if not messages:
+        return []
+
+    entities: List[LaunchDescriptionEntity] = []
+
+    for msg in messages:
+        if msg:
+            entities.append(LogInfo(msg=msg))
+
+    return entities
 
 
 def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:

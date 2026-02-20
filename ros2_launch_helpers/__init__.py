@@ -22,6 +22,7 @@ from .helpers import (
     set_global_namespace,
     set_robot_namespace,
     set_robot_prefix,
+    to_log_info_entities,
     underscorify_namespace,
 )
 from .version import __version__
@@ -51,5 +52,6 @@ __all__ = [
     'set_global_namespace',
     'set_robot_namespace',
     'set_robot_prefix',
+    'to_log_info_entities',
     '__version__',
 ]
