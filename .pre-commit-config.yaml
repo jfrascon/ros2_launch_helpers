@@ -12,6 +12,10 @@
 #
 # See https://github.com/pre-commit/pre-commit
 
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
 repos:
   # Standard hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -57,3 +61,11 @@ repos:
     hooks:
       - id: shfmt
         args: [-w, -s, -i=4]
+
+  # Conventional Commits validation (commit message hook)
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.2.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []
