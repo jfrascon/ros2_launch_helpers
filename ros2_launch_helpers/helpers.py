@@ -212,7 +212,7 @@ def underscorify_namespace(namespace: str) -> str:
     return _replace_separator_in_namespace(namespace, '_')
 
 
-def to_log_info_entities(messages: List[str]) -> List[LaunchDescriptionEntity]:
+def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
     """
     Convert a list of text messages into launch LogInfo entities.
 
