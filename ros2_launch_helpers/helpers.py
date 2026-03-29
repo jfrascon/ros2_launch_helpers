@@ -48,7 +48,8 @@ NODE_OPTIONS_DESC = (
 TOPIC_REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
 
 ################################################################################
-# Opaque functions.
+# Functions that can be passed as argument to OpaqueFunction.
+# (Context access available)
 ################################################################################
 
 
@@ -98,7 +99,8 @@ def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> 
 
 
 ################################################################################
-# Non-opaque functions.
+# Functions that can't be passed as argument to OpaqueFunction.
+# (Context access not available)
 ################################################################################
 
 
@@ -201,33 +203,6 @@ def dottify_namespace(namespace: str) -> str:
     :return: Dot-separated namespace string.
     """
     return _replace_separator_in_namespace(namespace, '.')
-
-
-def underscorify_namespace(namespace: str) -> str:
-    """
-    Convert a namespace into an underscore-separated format.
-    :param namespace: Namespace string.
-    :return: Underscore-separated namespace string.
-    """
-    return _replace_separator_in_namespace(namespace, '_')
-
-
-def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
-    """
-    Convert a list of text messages into launch LogInfo entities.
-
-    Empty messages are ignored.
-    """
-    if not messages:
-        return []
-
-    entities: List[LaunchDescriptionEntity] = []
-
-    for msg in messages:
-        if msg:
-            entities.append(LogInfo(msg=msg))
-
-    return entities
 
 
 def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
@@ -349,6 +324,33 @@ def is_valid_namespace(ns: str) -> Tuple[bool, str]:
             return (False, 'Namespace segments must be ASCII [A-Za-z0-9_] only')
 
     return (True, '')
+
+
+def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
+    """
+    Convert a list of text messages into launch LogInfo entities.
+
+    Empty messages are ignored.
+    """
+    if not messages:
+        return []
+
+    entities: List[LaunchDescriptionEntity] = []
+
+    for msg in messages:
+        if msg:
+            entities.append(LogInfo(msg=msg))
+
+    return entities
+
+
+def underscorify_namespace(namespace: str) -> str:
+    """
+    Convert a namespace into an underscore-separated format.
+    :param namespace: Namespace string.
+    :return: Underscore-separated namespace string.
+    """
+    return _replace_separator_in_namespace(namespace, '_')
 
 
 # def merge_yaml_maps_strict(
@@ -654,7 +656,7 @@ def process_topic_remappings(
     return topic_remappings
 
 
-def read_yaml_file(yaml_file: str) -> Tuple[str, Any]:
+def read_yaml_file(yaml_file: Union[str, Path]) -> Tuple[str, Any]:
     """
     Read and parse a YAML file, returning both the resolved path and the loaded object.
 
@@ -663,10 +665,7 @@ def read_yaml_file(yaml_file: str) -> Tuple[str, Any]:
         when the file contains only comments/whitespace.
     :raises ValueError: If the input path is invalid, the file cannot be found/read, or YAML syntax is invalid.
     """
-    if not isinstance(yaml_file, str):
-        raise ValueError(f'YAML file must be a str (got: {type(yaml_file).__name__})')
-
-    yaml_file = yaml_file.strip()
+    yaml_file = str(yaml_file).strip()
 
     if not yaml_file:
         raise ValueError('YAML file not provided')
@@ -695,33 +694,11 @@ def read_yaml_file(yaml_file: str) -> Tuple[str, Any]:
     return (resolved_yaml_file, data)
 
 
-def read_yaml_mapping(yaml_file: str) -> Tuple[str, Optional[Dict[str, Any]]]:
-    """
-    Load a YAML file and ensure the top-level document is a mapping, returning its resolved path and data.
-
-    :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
-    :return: Tuple '(resolved_path, mapping)' where 'mapping' is the parsed YAML dict.
-    :raises ValueError: If the file cannot be resolved/read, has invalid YAML, is empty, or the top-level
-        object is not a mapping.
-    """
-    resolved_yaml_file, data = read_yaml_file(yaml_file)
-
-    if not isinstance(data, dict):  # Top-level YAML object must be a mapping
-        raise ValueError(f"File '{resolved_yaml_file}' must be a mapping. Got: '{type(data).__name__}'")
-
-    # If file is empty or contains only comments/whitespace, 'data' is None.
-    # If file contains {}, 'data' is an empty dict.
-    return (resolved_yaml_file, data)
-
-
-def resolve_file(file: Optional[str]) -> str:
+def resolve_file(file: Optional[Union[str, Path]]) -> str:
     if file is None:
         return ''
 
-    if not isinstance(file, str):
-        raise ValueError(f'File must be a string (got: {type(file).__name__})')
-
-    file = file.strip()
+    file = str(file).strip()
 
     if not file:
         return ''
