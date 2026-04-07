@@ -41,7 +41,7 @@ repos:
   # Ruff replaces both Black (formatter) and isort (import sorting)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Find the latest version from https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.8
+    rev: v0.15.9
     hooks:
       # Run the linter and automatically fix any safe issues.
       - id: ruff
@@ -59,7 +59,7 @@ repos:
 
   # CPP hooks
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v22.1.1
+    rev: v22.1.2
     hooks:
       - id: clang-format
         files: \.(cpp|hpp|c|h)$
