@@ -19,10 +19,6 @@ DEFAULT_LOGGING_OPTIONS = {
 }
 
 
-def default_logging_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
-    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_LOGGING_OPTIONS.items())
-
-
 LOGGING_OPTIONS_DESC = (
     'key-value string, like "log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,'
     'disable-external-lib-logs=True,logger1_name=<level>,logger2_name=<level>".'
@@ -37,15 +33,11 @@ DEFAULT_NODE_OPTIONS = {
 }
 
 
-def default_node_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
-    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_NODE_OPTIONS.items())
-
-
 NODE_OPTIONS_DESC = (
     'key-value string, like "name=any_name,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
 )
 
-TOPIC_REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
+REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
 
 ################################################################################
 # Functions that can be passed as argument to OpaqueFunction.
@@ -55,154 +47,100 @@ TOPIC_REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
 
 def set_global_namespace(ctx: LaunchContext, namespace_key: str = 'namespace') -> list[LaunchDescriptionEntity]:
     """
-    Set a global namespace LaunchConfiguration by normalizing the provided namespace.
-    :param ctx: Launch context.
-    :param namespace_key: Key for the namespace LaunchConfiguration (default: 'namespace').
-    :return:
-    Create a global namespace from the provided namespace.
-
-    Semantics:
-    - ''  -> '/'
-    - '/' -> '/'
-    - 'ns', '/ns', 'ns/', '/ns/' -> '/ns'
-    - Reject spaces, consecutive '/', and non [A-Za-z0-9_] chars in segments.
+    Convert the namespace stored in `namespace_key` to an absolute namespace and write it back to
+    `namespace_key`.
     """
+    # For example:
+    # - 'a/b/c' is converted to /a/b/c, note the first '/' character.
+    # - '' is converted to '/'.
+
     namespace = LaunchConfiguration(namespace_key).perform(ctx)
-    return [SetLaunchConfiguration(namespace_key, create_global_namespace(namespace))]
+    return [SetLaunchConfiguration(namespace_key, resolve_name('/', namespace))]
+
+
+def set_robot_base_frame(
+    ctx: LaunchContext,
+    local_base_frame: str = 'base_link',
+    robot_prefix_key: str = 'robot_prefix',
+    base_frame_key: str = 'base_frame',
+) -> list[LaunchDescriptionEntity]:
+    """
+    Set the `robot_base_frame_key` in the launch context joining the `robot_prefix` and the
+    `base_frame`.
+    """
+    robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
+    return [SetLaunchConfiguration(base_frame_key, f'{robot_prefix}{local_base_frame}')]
 
 
 def set_robot_namespace(
-    ctx: LaunchContext, namespace_key: str = 'namespace', robot_name_key: str = 'robot_name'
+    ctx: LaunchContext,
+    namespace_key: str = 'project_namespace',
+    robot_name_key: str = 'robot_name',
+    robot_namespace_key: str = 'namespace',
 ) -> list[LaunchDescriptionEntity]:
     """
-    Set the 'robot_namespace' LaunchConfiguration by combining 'namespace' and 'robot_name'.
-    :param ctx: Launch context.
-    :param namespace_key: Key for the base namespace LaunchConfiguration (default: 'namespace').
-    :param robot_name_key: Key for the robot name LaunchConfiguration (default: 'robot_name').
-    :return: List with a SetLaunchConfiguration for 'robot_namespace'.
+    Set the `robot_namespace_key` in the launch context by resolving the `robot_name` into the
+    `namespace`.
     """
-
     namespace = LaunchConfiguration(namespace_key).perform(ctx)
     robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-    return [SetLaunchConfiguration('robot_namespace', create_robot_namespace(namespace, robot_name))]
+    return [SetLaunchConfiguration(robot_namespace_key, resolve_name(namespace, robot_name))]
 
 
-def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> list[LaunchDescriptionEntity]:
+def set_robot_odometry_frame(
+    ctx: LaunchContext,
+    local_odometry_frame: str = 'odom',
+    robot_prefix_key: str = 'robot_prefix',
+    odometry_frame_key: str = 'odometry_frame',
+) -> list[LaunchDescriptionEntity]:
     """
-    Set the 'robot_prefix' LaunchConfiguration by creating it from 'robot_name'.
-    :param ctx: Launch context.
-    :param robot_name_key: Key for the robot name LaunchConfiguration (default: 'robot_name').
-    :return: List with a SetLaunchConfiguration for 'robot_prefix'.
+    Set the `odometry_frame_key` in the launch context joining the `robot_prefix` and the `odometry_frame`.
+    """
+    robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
+    return [SetLaunchConfiguration(odometry_frame_key, f'{robot_prefix}{local_odometry_frame}')]
+
+
+def set_robot_prefix(
+    ctx: LaunchContext, robot_name_key: str = 'robot_name', robot_prefix_key: str = 'robot_prefix'
+) -> list[LaunchDescriptionEntity]:
+    """
+    Set the 'robot_prefix_key' in the launch context by converting the 'robot_name' into a prefix format
+    (e.g., 'robot1' -> 'robot1_')
     """
     robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-    return [SetLaunchConfiguration('robot_prefix', create_robot_prefix(robot_name))]
+    return [SetLaunchConfiguration(robot_prefix_key, to_prefix(robot_name))]
 
 
 ################################################################################
-# Functions that can't be passed as argument to OpaqueFunction.
-# (Context access not available)
+# Functions without access to the context
 ################################################################################
 
 
-def create_global_namespace(namespace: str) -> str:
+def default_logging_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
+    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_LOGGING_OPTIONS.items())
+
+
+def default_node_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
+    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_NODE_OPTIONS.items())
+
+
+def flatten_namespace(namespace: str, new_sep: str) -> str:
+    """
+    Flatten a namespace into a non-hierarchical string.
+
+    The leading and trailing '/' are removed before replacing inner '/' separators with `new_sep`.
+    This means the root namespace '/' and the empty namespace '' are both represented as ''.
+    """
     if not isinstance(namespace, str):
         raise ValueError('Namespace must be a string')
 
-    namespace = namespace.strip()
-
-    # Empty namespace becomes root '/' and so does '/'.
-    if namespace in ('', '/'):
-        return '/'
-
-    # A namespace should not end in a '/'; remove any trailing '/' to normalize.
-    namespace = namespace.rstrip('/')
-
-    # A global namespace must start with a '/'.
-    if not namespace.startswith('/'):
-        namespace = '/' + namespace
-
-    namespace_is_valid, error_msg = is_valid_namespace(namespace)
-
-    if not namespace_is_valid:
-        raise RuntimeError(f"Invalid namespace '{namespace}': {error_msg}")
-
-    return namespace
-
-
-def create_robot_namespace(namespace: str, robot_name: str) -> str:
-    """
-    Create a robot namespace by combining a base namespace and a robot name.
-    :param namespace: Base namespace (can be empty or '/').
-    :param robot_name: Robot name (must be a valid name).
-    :return: Combined robot namespace.
-    """
-    # The 'robot_namespace' is the concatenation of the 'namespace' and the 'robot_name', using the character '/' a
-    # separtor.
-    # namespace=''          -> robot_namespace = robot_name
-    # namespace='/'         -> robot_namespace = '/' + robot_name
-    # namespace='ns'        -> robot_namespace = 'ns' + '/' + robot_name
-    # namespace='ns/'       -> robot_namespace = 'ns' + '/' + robot_name
-    # namespace='/ns/'      -> robot_namespace = '/ns' + '/' + robot_name
-    # namespace='/ns1/ns2'  -> robot_namespace = '/ns1/ns2' + '/' + robot_name
-    # namespace='/ns1/ns2/' -> robot_namespace = '/ns1/ns2' + '/' + robot_name
-
-    if not isinstance(namespace, str):
-        raise ValueError('Namespace must be a string')
-
-    if not isinstance(robot_name, str):
-        raise ValueError('Robot name must be a string')
-
-    # Remove extra white spaces at the beginning and the end of the robot's name.
-    robot_name = robot_name.strip()
-
-    if not is_valid_name(robot_name):
-        raise RuntimeError(f"'{robot_name}' must be a non-empty string with ASCII [A-Za-z0-9_] only")
+    if not is_valid_namespace(namespace):
+        raise RuntimeError(f"Invalid namespace '{namespace}'")
 
     if namespace in ('', '/'):
-        return namespace + robot_name
+        return ''
 
-    # Ensure namespace does not end with '/', so we can safely concatenate 'namespace + '/' + robot_name', proven
-    # the namespace is valid.
-    if namespace.endswith('/'):
-        namespace = namespace.rstrip('/')
-
-    namespace_is_valid, error_msg = is_valid_namespace(namespace)
-
-    if not namespace_is_valid:
-        raise RuntimeError(f"Invalid namespace '{namespace}': {error_msg}")
-
-    # Note: The namespace does not end in '/', but it may or may not start with '/', depending on what the user
-    # provided, since this is not enforced here.
-
-    return f'{namespace}/{robot_name}'
-
-
-def create_robot_prefix(robot_name: str) -> str:
-    if not isinstance(robot_name, str):
-        raise ValueError('Robot name must be a string')
-
-    # Remove extra white spaces at the beginning and the end of the robot's name.
-    robot_name = robot_name.strip()
-
-    if not is_valid_name(robot_name):
-        raise RuntimeError(f"'{robot_name}' must be a non-empty string with ASCII [A-Za-z0-9_] only")
-
-    # If the robot name already ends with '_', return it as is.
-    # It is discouraged to have robot names ending with '_', but technically it is allowed, since
-    # the 'is_valid_name' function allows it.
-    if robot_name.endswith('_'):
-        return robot_name
-    else:
-        return f'{robot_name}_'
-
-
-def dottify_namespace(namespace: str) -> str:
-    """
-    Convert a namespace into a dot-separated format.
-    :param namespace: Namespace string.
-    :return: Dot-separated namespace string.
-    """
-    return _replace_separator_in_namespace(namespace, '.')
+    return replace_separator_in_namespace(namespace.strip('/'), new_sep)
 
 
 def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
@@ -272,7 +210,7 @@ def is_valid_name(s: str) -> bool:
     return all((c == '_') or (c.isascii() and c.isalnum()) for c in s)
 
 
-def is_valid_namespace(ns: str) -> Tuple[bool, str]:
+def is_valid_namespace(ns: str) -> bool:
     """
     Validate a namespace string.
 
@@ -282,7 +220,7 @@ def is_valid_namespace(ns: str) -> Tuple[bool, str]:
     - Each non-empty segment must be valid, i.e., ASCII alnum or underscore only, [A-Za-z0-9_].
     """
     if ns in ('', '/'):
-        return (True, '')
+        return True
 
     # When two or more slashes are contiguos, when you split the string by '/', you get empty segments.
     # For example:
@@ -302,7 +240,7 @@ def is_valid_namespace(ns: str) -> Tuple[bool, str]:
 
     # If ns is '//', after removing leading and trailing slashes, it becomes '', which is an invalid namespace.
     if not ns:
-        return (False, "Namespace cannot be empty after removing leading and trailing '/'")
+        return False
 
     # Examples at this point:
     # '/ns1//ns2/' -> 'ns1//ns2' -> ['ns1', '', 'ns2'] -> two or more '/' in a row, this is an error.
@@ -317,40 +255,13 @@ def is_valid_namespace(ns: str) -> Tuple[bool, str]:
         # Technically, we could have removed this 'if not item' check, since 'is_valid_name' would return False for
         # empty strings, but this way we can provide a more specific error message.
         if not item:
-            return (False, "Consecutive '/' are not allowed in a namespace")
+            return False
 
         # Check the item is in valid, which means ASCII alnum or underscore only, [A-Za-z0-9_].
         if not is_valid_name(item):
-            return (False, 'Namespace segments must be ASCII [A-Za-z0-9_] only')
+            return False
 
-    return (True, '')
-
-
-def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
-    """
-    Convert a list of text messages into launch LogInfo entities.
-
-    Empty messages are ignored.
-    """
-    if not messages:
-        return []
-
-    entities: List[LaunchDescriptionEntity] = []
-
-    for msg in messages:
-        if msg:
-            entities.append(LogInfo(msg=msg))
-
-    return entities
-
-
-def underscorify_namespace(namespace: str) -> str:
-    """
-    Convert a namespace into an underscore-separated format.
-    :param namespace: Namespace string.
-    :return: Underscore-separated namespace string.
-    """
-    return _replace_separator_in_namespace(namespace, '_')
+    return True
 
 
 # def merge_yaml_maps_strict(
@@ -437,7 +348,7 @@ def underscorify_namespace(namespace: str) -> str:
 #     return nested, applied, ignored
 
 
-def process_logging_options(
+def process_node_logging_options(
     logging_options_kvs: Optional[str], item_sep: str = ',', key_value_sep: str = '='
 ) -> List[str]:
     """
@@ -473,7 +384,7 @@ def process_logging_options(
 
         return args
 
-    # Passing default values to 'logging_options', so:
+    # Passing default values to 'node_logging_options', so:
     # - In case a key is missing, it gets the default value.
     # - In case 'logging_options_kvs' is empty, we use the default log options.
     logging_options: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
@@ -607,7 +518,7 @@ def process_node_options(
     return node_options
 
 
-def process_topic_remappings(
+def process_remappings(
     topic_remappings_kvs: Optional[str], item_sep: str = ',', topic_remapping_sep: str = ':='
 ) -> Optional[List[Tuple[str, str]]]:
     """
@@ -694,6 +605,26 @@ def read_yaml_file(yaml_file: Union[str, Path]) -> Tuple[str, Any]:
     return (resolved_yaml_file, data)
 
 
+def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
+    """
+    Replace each '/' separator in a namespace with `new_sep`.
+
+    This function performs the replacement on the namespace string itself. It does not remove a leading
+    '/' or a trailing '/'. For example, '/' becomes `new_sep`, and '/ns1/ns2/' becomes
+    '<new_sep>ns1<new_sep>ns2<new_sep>'.
+    """
+    if not isinstance(namespace, str):
+        raise ValueError('Namespace must be a string')
+
+    if not isinstance(new_sep, str) or len(new_sep) != 1:
+        raise ValueError('New separator must be a single character string')
+
+    if not is_valid_namespace(namespace):
+        raise RuntimeError(f"Invalid namespace '{namespace}'")
+
+    return namespace.replace('/', new_sep)
+
+
 def resolve_file(file: Optional[Union[str, Path]]) -> str:
     if file is None:
         return ''
@@ -728,34 +659,91 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
     return os.path.expanduser(file)
 
 
-def _replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
-    if not isinstance(namespace, str):
-        raise ValueError('Namespace must be a string')
+def resolve_name(parent_namespace: str, child_name: str) -> str:
+    """
+    Resolve `child_name` with respect to `parent_namespace`.
 
-    if not isinstance(new_sep, str) or len(new_sep) != 1:
-        raise ValueError('New separator must be a single character string')
+    `child_name` can be a single relative name segment such as `robot`, a relative namespace
+    expression such as `ns1/ns2`, an absolute namespace expression such as `/ns1/ns2`, or an empty
+    string.
 
-    # No conversion happens for these cases.
-    # '' -> ''
-    # '/' -> ''
-    if namespace in ('', '/'):
-        return ''
+    If `child_name` is relative, append it to `parent_namespace`.
+    If `child_name` is absolute, return `child_name` and ignore `parent_namespace`.
+    If `child_name` is empty, return `parent_namespace`.
 
-    namespace_is_valid, error_msg = is_valid_namespace(namespace)
+    Both inputs must be valid namespace strings. This function does not collapse repeated `/`; it
+    rejects invalid namespaces instead.
+    """
+    if not isinstance(parent_namespace, str) or not isinstance(child_name, str):
+        raise ValueError('Arguments must be strings')
 
-    if not namespace_is_valid:
-        raise RuntimeError(f"Invalid namespace '{namespace}': {error_msg}")
+    if not is_valid_namespace(parent_namespace):
+        raise ValueError(f"Invalid parent namespace '{parent_namespace}'")
 
-    # Now that we know the namespace is valid, we transform the '/' separators into '<new_sep>' separators.
-    # Be aware that, leading and trailing '/' are removed in the process.
+    if not is_valid_namespace(child_name):
+        raise ValueError(f"Invalid child name '{child_name}'")
 
-    # If we consider <c> as the new separator, for the sake of the examples:
-    # namespace=''          -> ''
-    # namespace='/'         -> ''
-    # namespace='ns'        -> ns
-    # namespace='ns/'       -> ns
-    # namespace='/ns/'      -> ns
-    # namespace='/ns1/ns2'  -> ns1<c>ns2
-    # namespace='/ns1/ns2/' -> ns1<c>ns2
+    # If the child name starts with '/', it is an absolute namespace, so we return it as is.
+    # - child_name = '/'           -> resolved_namespace = '/'
+    # - child_name = '/ns1/ns2[/]' -> resolved_namespace = '/ns1/ns2'
+    if child_name.startswith('/'):
+        return child_name if child_name == '/' else child_name.rstrip('/')
 
-    return namespace.strip('/').replace('/', new_sep)
+    # If the child namespace is empty, we return the parent namespace as is (after normalizing it to
+    # avoid ending with '/').
+    if child_name == '':
+        return parent_namespace if parent_namespace in ('', '/') else parent_namespace.rstrip('/')
+
+    # If here, the child namespace is a relative namespace, not empty.
+
+    # If the parent namespace is empty or '/', the parent namespace and the child namespace are
+    # concatenated without adding an extra '/' between them.
+    if parent_namespace in ('', '/'):
+        return parent_namespace + child_name.rstrip('/')
+
+    # If here, a possible '/' is stripped off the end of the parent namespace, and the child
+    # namespace is concatenated to it with a '/' in between.
+    return parent_namespace.rstrip('/') + '/' + child_name.rstrip('/')
+
+
+# def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> list[LaunchDescriptionEntity]:
+#     """
+#     Set the 'robot_prefix' LaunchConfiguration by creating it from 'robot_name'.
+#     :param ctx: Launch context.
+#     :param robot_name_key: Key for the robot name LaunchConfiguration (default: 'robot_name').
+#     :return: List with a SetLaunchConfiguration for 'robot_prefix'.
+#     """
+#     robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
+#     return [SetLaunchConfiguration('robot_prefix', create_robot_prefix(robot_name))]
+
+
+def to_prefix(name: str) -> str:
+    if not isinstance(name, str):
+        raise ValueError('name must be a string to create a prefix')
+
+    if not is_valid_name(name):
+        raise RuntimeError(f"'{name}' must be a non-empty string with ASCII [A-Za-z0-9_] only to create a prefix")
+
+    # If the name already ends with '_', return it as is.
+    if name.endswith('_'):
+        return name
+    else:
+        return f'{name}_'
+
+
+def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
+    """
+    Convert a list of text messages into launch LogInfo entities.
+
+    Empty messages are ignored.
+    """
+    if not messages:
+        return []
+
+    entities: List[LaunchDescriptionEntity] = []
+
+    for msg in messages:
+        if msg:
+            entities.append(LogInfo(msg=msg))
+
+    return entities
