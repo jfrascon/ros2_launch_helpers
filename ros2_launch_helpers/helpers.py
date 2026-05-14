@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -20,12 +21,12 @@ DEFAULT_LOGGING_OPTIONS = {
 
 
 LOGGING_OPTIONS_DESC = (
-    'key-value string, like "log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,'
-    'disable-external-lib-logs=True,logger1_name=<level>,logger2_name=<level>".'
+    'JSON object indexed by current node name. Each node entry can set "log-level", '
+    '"disable-stdout-logs", "disable-rosout-logs", "disable-external-lib-logs", '
+    'and custom logger levels.'
 )
 
 DEFAULT_NODE_OPTIONS = {
-    'name': '',  # Node name (if empty, use default from the node executable)
     'output': 'screen',  # One of: 'screen', 'log', 'both'
     'emulate_tty': True,  # Whether to emulate a TTY for the node's stdout/stderr (usually True for 'screen' or 'both')
     'respawn': False,  # Whether to respawn the node if it dies
@@ -34,10 +35,14 @@ DEFAULT_NODE_OPTIONS = {
 
 
 NODE_OPTIONS_DESC = (
-    'key-value string, like "name=any_name,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0".'
+    'JSON object indexed by current node name. Each node entry can set "output", '
+    '"emulate_tty", "respawn", and "respawn_delay".'
 )
 
-REMAPPINGS_DESC = 'key-value string, like "/a:=/b,/c:=d,e:=/f,g:=h"'
+REMAPPINGS_DESC = (
+    'JSON object indexed by current node name. Each node entry is a list of '
+    'remapping strings using the "from:=to" syntax.'
+)
 
 ################################################################################
 # Functions that can be passed as argument to OpaqueFunction.
@@ -116,12 +121,16 @@ def set_robot_prefix(
 ################################################################################
 
 
-def default_logging_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
-    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_LOGGING_OPTIONS.items())
+def default_node_logging_options_json_str() -> str:
+    return '{}'
 
 
-def default_node_options_str(item_sep: str = ',', key_value_sep: str = '=') -> str:
-    return item_sep.join(f'{k}{key_value_sep}{v}' for k, v in DEFAULT_NODE_OPTIONS.items())
+def default_node_options_json_str() -> str:
+    return '{}'
+
+
+def default_node_remappings_json_str() -> str:
+    return '{}'
 
 
 def flatten_namespace(namespace: str, new_sep: str) -> str:
@@ -348,223 +357,278 @@ def is_valid_namespace(ns: str) -> bool:
 #     return nested, applied, ignored
 
 
-def process_node_logging_options(
-    logging_options_kvs: Optional[str], item_sep: str = ',', key_value_sep: str = '='
-) -> List[str]:
+def resolve_node_launch_configs(
+    node_names: List[str],
+    node_options: Optional[str],
+    node_logging_options: Optional[str],
+    node_remappings: Optional[str],
+) -> Tuple[
+    Dict[str, Dict[str, Union[str, bool, float]]],
+    Dict[str, Optional[List[Tuple[str, str]]]],
+    Dict[str, List[str]],
+]:
+    if not isinstance(node_names, list):
+        raise ValueError('node_names must be a list of node names')
+
+    for index, node_name in enumerate(node_names):
+        _NodeLaunchConfig.validate_node_name(node_name, f'node_names item {index}')
+
+    config = _NodeLaunchConfig.from_json_strings(
+        node_options=node_options,
+        node_logging_options=node_logging_options,
+        node_remappings=node_remappings,
+    )
+
+    node_options_by_name: Dict[str, Dict[str, Union[str, bool, float]]] = {}
+    remappings_by_name: Dict[str, Optional[List[Tuple[str, str]]]] = {}
+    ros_arguments_by_name: Dict[str, List[str]] = {}
+
+    for node_name in node_names:
+        node_options_by_name[node_name] = config.options_for(node_name)
+        remappings_by_name[node_name] = config.remappings_for(node_name)
+        ros_arguments_by_name[node_name] = config.logging_ros_arguments_for(node_name)
+
+    return node_options_by_name, remappings_by_name, ros_arguments_by_name
+
+
+class _NodeLaunchConfig:
     """
-    Parse the log options string into a ROS arguments string.
-    :param logging_options_kvs: Key-value string for ROS logging options.
-    :return: ROS arguments string.
+    Store node launch overrides from the three JSON launch arguments.
 
-    Reference: https://docs.ros.org/en/rolling/Tutorials/Demos/Logging-and-logger-configuration.html
-
-    Example
-    logging_options_kvs="log-level=info,disable-stdout-logs=True,disable-rosout-logs=True,disable-external-lib-logs=True,
-                  logger1_name=<level>,logger2_name=<level>"
-    output: [--log-level, info, --disable-stdout-logs, --disable-rosout-logs, --disable-external-lib-logs, --logger,
-             logger1_name=<level>, --logger, logger2_name=<level>]
+    Each JSON value is a map indexed by the effective node name used by the launch file.
     """
 
-    def to_ros_args(logging_options: Dict[str, Any]) -> List[str]:
+    _LOG_LEVELS = ('debug', 'info', 'warn', 'error')
+    _CUSTOM_LOG_LEVELS = ('debug', 'info', 'warn', 'error', 'fatal')
+    _LOGGING_BOOLEAN_KEYS = (
+        'disable-stdout-logs',
+        'disable-rosout-logs',
+        'disable-external-lib-logs',
+    )
+    _OUTPUT_VALUES = ('screen', 'log', 'both')
+
+    def __init__(
+        self,
+        node_options: Dict[str, Any],
+        node_logging_options: Dict[str, Any],
+        node_remappings: Dict[str, Any],
+    ) -> None:
+        self._node_options = node_options
+        self._node_logging_options = node_logging_options
+        self._node_remappings = node_remappings
+
+    @classmethod
+    def from_json_strings(
+        cls,
+        node_options: Optional[str],
+        node_logging_options: Optional[str],
+        node_remappings: Optional[str],
+    ) -> '_NodeLaunchConfig':
+        return cls(
+            node_options=cls._parse_json_map(node_options, 'node_options'),
+            node_logging_options=cls._parse_json_map(node_logging_options, 'node_logging_options'),
+            node_remappings=cls._parse_json_map(node_remappings, 'node_remappings'),
+        )
+
+    def logging_ros_arguments_for(self, current_node_name: str) -> List[str]:
+        self.validate_node_name(current_node_name, 'current_node_name')
+        logging_options: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
+        node_logging_options = self._entry_for(
+            self._node_logging_options, current_node_name, 'node_logging_options'
+        )
+
+        if node_logging_options is None:
+            return self._logging_options_to_ros_args(logging_options)
+
+        if not isinstance(node_logging_options, dict):
+            raise ValueError(
+                f"node_logging_options entry for node '{current_node_name}' must be a JSON object"
+            )
+
+        for key, value in node_logging_options.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError(f"node_logging_options for node '{current_node_name}' has an invalid key")
+
+            if key == 'log-level':
+                logging_options[key] = self._validate_log_level(value, current_node_name, key)
+            elif key in self._LOGGING_BOOLEAN_KEYS:
+                logging_options[key] = self._validate_bool(value, 'node_logging_options', current_node_name, key)
+            else:
+                logging_options[key] = self._validate_custom_log_level(value, current_node_name, key)
+
+        return self._logging_options_to_ros_args(logging_options)
+
+    def options_for(self, current_node_name: str) -> Dict[str, Union[str, bool, float]]:
+        self.validate_node_name(current_node_name, 'current_node_name')
+        node_options: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
+        node_options_overrides = self._entry_for(self._node_options, current_node_name, 'node_options')
+
+        if node_options_overrides is None:
+            return node_options
+
+        if not isinstance(node_options_overrides, dict):
+            raise ValueError(f"node_options entry for node '{current_node_name}' must be a JSON object")
+
+        for key, value in node_options_overrides.items():
+            if key not in DEFAULT_NODE_OPTIONS:
+                raise ValueError(f"node_options for node '{current_node_name}' has unknown key '{key}'")
+
+            match key:
+                case 'output':
+                    node_options[key] = self._validate_output(value, current_node_name)
+                case 'emulate_tty':
+                    node_options[key] = self._validate_bool(value, 'node_options', current_node_name, key)
+                case 'respawn':
+                    node_options[key] = self._validate_bool(value, 'node_options', current_node_name, key)
+                case 'respawn_delay':
+                    node_options[key] = self._validate_number(value, 'node_options', current_node_name, key)
+                case _:  # Should never happen because unknown keys are rejected above.
+                    pass
+
+        return node_options
+
+    def remappings_for(self, current_node_name: str) -> Optional[List[Tuple[str, str]]]:
+        self.validate_node_name(current_node_name, 'current_node_name')
+        node_remappings = self._entry_for(self._node_remappings, current_node_name, 'node_remappings')
+
+        if node_remappings is None:
+            return None
+
+        if not isinstance(node_remappings, list):
+            raise ValueError(f"node_remappings entry for node '{current_node_name}' must be a JSON list")
+
+        remappings: List[Tuple[str, str]] = []
+        for index, remapping in enumerate(node_remappings):
+            if not isinstance(remapping, str):
+                raise ValueError(
+                    f"node_remappings item {index} for node '{current_node_name}' must be a string"
+                )
+
+            try:
+                original_topic, new_topic = remapping.split(':=', maxsplit=1)
+            except ValueError as e:
+                raise ValueError(
+                    f"node_remappings item {index} for node '{current_node_name}' must use 'from:=to' syntax"
+                ) from e
+
+            if not original_topic:
+                raise ValueError(
+                    f"node_remappings item {index} for node '{current_node_name}' must have a non-empty 'from'"
+                )
+
+            if not new_topic:
+                raise ValueError(
+                    f"node_remappings item {index} for node '{current_node_name}' must have a non-empty 'to'"
+                )
+
+            remappings.append((original_topic, new_topic))
+
+        return remappings
+
+    @staticmethod
+    def _entry_for(values: Dict[str, Any], current_node_name: str, field_name: str) -> Optional[Any]:
+        try:
+            return values[current_node_name]
+        except KeyError:
+            return None
+        except TypeError as e:
+            raise ValueError(f'{field_name} must be a JSON object') from e
+
+    @staticmethod
+    def _logging_options_to_ros_args(logging_options: Dict[str, Any]) -> List[str]:
         args = []
 
-        for k, v in logging_options.items():
-            if k == 'log-level':
-                v = v.strip()
-                if v:
-                    args.extend([f'--{k}', v])
-            elif k == 'disable-stdout-logs' or k == 'disable-rosout-logs' or k == 'disable-external-lib-logs':
-                if v:
-                    args.append(f'--{k}')
-            # If it is not one of the known keys, it must be a custom logger level.
-            else:
-                v = v.strip()
-                if v:
-                    args.extend(['--log-level', f'{k}:={v}'])  # Note the ':=' separator for custom loggers.
+        for key, value in logging_options.items():
+            if key == 'log-level':
+                if value:
+                    args.extend(['--log-level', value])
+            elif key in _NodeLaunchConfig._LOGGING_BOOLEAN_KEYS:
+                if value:
+                    args.append(f'--{key}')
+            elif value:
+                args.extend(['--log-level', f'{key}:={value}'])
 
         return args
 
-    # Passing default values to 'node_logging_options', so:
-    # - In case a key is missing, it gets the default value.
-    # - In case 'logging_options_kvs' is empty, we use the default log options.
-    logging_options: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
+    @staticmethod
+    def _parse_json_map(value: Optional[str], field_name: str) -> Dict[str, Any]:
+        if value is None:
+            return {}
 
-    # If no log options are provided, return the default log options as ROS args.
-    if not isinstance(logging_options_kvs, str):
-        return to_ros_args(logging_options)
+        if not isinstance(value, str):
+            raise ValueError(f'{field_name} must be a JSON string')
 
-    logging_options_kvs = logging_options_kvs.strip()
+        value = value.strip()
+        if not value:
+            return {}
 
-    # If the logging options string is empty, return the default logging options as ROS args.
-    if not logging_options_kvs:
-        return to_ros_args(logging_options)
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(f'{field_name} must be valid JSON') from e
 
-    # Iterate over each key-value pair in the log options string.
-    for logging_option in logging_options_kvs.split(item_sep):
-        logging_option = logging_option.strip()
+        if not isinstance(parsed, dict):
+            raise ValueError(f'{field_name} must be a JSON object')
 
-        # If the element between the item separators is empty or does not contain the key-value separator, skip it.
-        if not logging_option or key_value_sep not in logging_option:
-            continue
+        return parsed
 
-        # Split only on the first occurrence of the key-value separator.
-        key, val = logging_option.split(key_value_sep, 1)
+    @staticmethod
+    def _validate_bool(value: Any, field_name: str, current_node_name: str, key: str) -> bool:
+        if not isinstance(value, bool):
+            raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a boolean")
 
-        # Strip leading and trailing spaces.
-        # Key must be passed as is (case-sensitive), but we allow values to be case-insensitive, so we convert them to
-        # lower case for easier comparison.
-        key = key.strip()
-        val = val.strip().lower()
+        return value
 
-        # If no key or value is provided, skip it.
-        if not key or not val:
-            continue
+    @classmethod
+    def _validate_custom_log_level(cls, value: Any, current_node_name: str, key: str) -> str:
+        level = cls._validate_string(value, 'node_logging_options', current_node_name, key).lower()
+        if level not in cls._CUSTOM_LOG_LEVELS:
+            raise ValueError(
+                f"node_logging_options custom logger '{key}' for node '{current_node_name}' has invalid level "
+                f"'{value}'"
+            )
 
-        match key:
-            case 'log-level':
-                if val in ('debug', 'info', 'warn', 'error'):
-                    logging_options[key] = val
-            case 'disable-stdout-logs':
-                if val in ('true', 'false'):
-                    logging_options[key] = val == 'true'
-            case 'disable-rosout-logs':
-                if val in ('true', 'false'):
-                    logging_options[key] = val == 'true'
-            case 'disable-external-lib-logs':
-                if val in ('true', 'false'):
-                    logging_options[key] = val == 'true'
-            # If it is not one of the known keys, it must be a custom logger level.
-            # A custom logger has the form 'logger_name=<level>'.
-            # Important, for a logger to apply correctly in the node, its name must be fully qualified with the node's
-            # namespace
-            case _:
-                if val in ('debug', 'info', 'warn', 'error', 'fatal'):
-                    # key is the logger name, val is the log level.
-                    logging_options[key] = val
+        return level
 
-    # print(f'Log options dict: {logging_options}')
-    # print(f'ROS args: {to_ros_args(logging_options)}')
+    @classmethod
+    def _validate_log_level(cls, value: Any, current_node_name: str, key: str) -> str:
+        level = cls._validate_string(value, 'node_logging_options', current_node_name, key).lower()
+        if level not in cls._LOG_LEVELS:
+            raise ValueError(
+                f"node_logging_options '{key}' for node '{current_node_name}' has invalid level '{value}'"
+            )
 
-    return to_ros_args(logging_options)
+        return level
 
+    @staticmethod
+    def validate_node_name(node_name: str, field_name: str) -> None:
+        if not isinstance(node_name, str) or not node_name:
+            raise ValueError(f'{field_name} must be a non-empty string')
 
-def process_node_options(
-    node_options_kvs: Optional[str], item_sep: str = ',', key_value_sep: str = '='
-) -> Dict[str, Union[str, bool, float]]:
-    """
-    Parse the node options string into a dictionary.
-    :param node_options_kvs: Key-value string for node options.
-    :return: Dictionary with node options.
+        if not is_valid_name(node_name):
+            raise ValueError(f"{field_name} must be ASCII [A-Za-z0-9_] only: '{node_name}'")
 
-    Example
-    node_options_kvs="name=<any_name>,output=both,emulate_tty=True,respawn=True,respawn_delay=3.0"
-    output: {'name': <any_name>, 'output': 'both', 'emulate_tty': True, 'respawn': True, 'respawn_delay': 3.0}
-    """
-    node_options: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
+    @staticmethod
+    def _validate_number(value: Any, field_name: str, current_node_name: str, key: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (float, int)):
+            raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a number")
 
-    # If node_options_kvs is not a string, return the default node options.
-    if not isinstance(node_options_kvs, str):
-        return node_options
+        return float(value)
 
-    # If the node_options_kvs is empty, return the default node options.
-    node_options_kvs = node_options_kvs.strip()
+    @classmethod
+    def _validate_output(cls, value: Any, current_node_name: str) -> str:
+        output = cls._validate_string(value, 'node_options', current_node_name, 'output')
+        if output not in cls._OUTPUT_VALUES:
+            raise ValueError(f"node_options 'output' for node '{current_node_name}' has invalid value '{value}'")
 
-    if not node_options_kvs:
-        return node_options
+        return output
 
-    # Iterate over each key-value pair in the node options string, processing only known keys.
-    for node_option in node_options_kvs.split(item_sep):
-        node_option = node_option.strip()
+    @staticmethod
+    def _validate_string(value: Any, field_name: str, current_node_name: str, key: str) -> str:
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a non-empty string")
 
-        # If the element between separators is empty or does not contain the key-value separator, skip it.
-        if not node_option or key_value_sep not in node_option:
-            continue
-
-        key, val = node_option.split(key_value_sep, 1)
-
-        # Remove leading and trailing spaces and convert to lower case for easier comparison.
-        key = key.strip().lower()
-        val = val.strip().lower()
-
-        # If no key is provided or the key is not known, skip it.
-        if not key or key not in DEFAULT_NODE_OPTIONS:
-            continue
-
-        # Process known keys.
-        match key:
-            case 'name':
-                # If the key is 'name', accept any non-empty value that is not 'default'.
-                # If 'name' is empty or 'default', the value associated with 'name' is empty, which means the node
-                # will use its default name.
-                if val and val != 'default':
-                    node_options[key] = val
-            case 'output':
-                if val in ('screen', 'log', 'both'):
-                    node_options[key] = val
-            case 'emulate_tty':
-                if val in ('true', 'false'):
-                    node_options[key] = val == 'true'
-            case 'respawn':
-                if val in ('true', 'false'):
-                    node_options[key] = val == 'true'
-            case 'respawn_delay':
-                try:
-                    node_options[key] = float(val)
-                except Exception as e:
-                    raise ValueError(f"Invalid value for 'respawn_delay': '{val}'") from e
-            case _:  # Should never happen
-                pass
-
-    return node_options
-
-
-def process_remappings(
-    topic_remappings_kvs: Optional[str], item_sep: str = ',', topic_remapping_sep: str = ':='
-) -> Optional[List[Tuple[str, str]]]:
-    """
-    Parse the topic remappings string into a list of (from, to) tuples.
-    :param topic_remappings_kvs: Key-value string for topic remappings.
-    :return: List of (from, to) tuples.
-
-    Example
-    topic_remappings_kvs="/a:=/b,/c:=d,e:=/f,g:=h"
-    ouput: [('/a', '/b'), ('/c', 'd'), ('e', '/f'), ('g', 'h')]
-    """
-
-    # If topic_remappings_kvs is not a string, return None.
-    if not isinstance(topic_remappings_kvs, str):
-        return None
-
-    topic_remappings_kvs = topic_remappings_kvs.strip()
-
-    # If the topic_remappings_kvs string is empty, return None.
-    if not topic_remappings_kvs:
-        return None
-
-    topic_remappings: List[Tuple[str, str]] = []
-
-    for topic_remapping in topic_remappings_kvs.split(item_sep):
-        topic_remapping = topic_remapping.strip()
-
-        # If the element between commas is empty, skip it.
-        if not topic_remapping:
-            continue
-
-        if topic_remapping_sep not in topic_remapping:
-            continue  # Ignore invalid topic remapping
-
-        original_topic, new_topic = topic_remapping.split(topic_remapping_sep, 1)
-
-        original_topic = original_topic.strip()
-        new_topic = new_topic.strip()
-
-        # If the original or new topic is empty, skip it.
-        if not original_topic or not new_topic:
-            continue  # Ignore invalid remapping
-
-        topic_remappings.append((original_topic, new_topic))
-
-    return topic_remappings
+        return value
 
 
 def read_yaml_file(yaml_file: Union[str, Path]) -> Tuple[str, Any]:
