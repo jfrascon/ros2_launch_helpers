@@ -370,9 +370,9 @@ def render_params_file(
     params_file: Union[str, Path],
     rendered_params_file: Union[str, Path],
     ctx: LaunchContext,
-) -> Path:
+) -> None:
     """
-    Render one ROS parameter YAML file and return the rendered file path.
+    Render one ROS parameter YAML file.
 
     `params_file` may be a normal filesystem path, a `file://` URI, or a
     `package://<package>/<path>` URI. The rendered YAML is written to the
@@ -384,7 +384,7 @@ def render_params_file(
 
     This function copies the temporary expanded YAML to `rendered_params_file`
     because `ParameterFile.cleanup()` deletes the temporary file. Callers must decide
-    explicitly whether to store the returned path in the launch context with
+    explicitly whether to store that path in the launch context with
     `SetLaunchConfiguration`.
     """
     params_file = Path(resolve_file(params_file))
@@ -402,8 +402,6 @@ def render_params_file(
         output_path.write_text(Path(evaluated_path).read_text(encoding='utf-8'), encoding='utf-8')
     finally:
         parameter_file.cleanup()
-
-    return output_path
 
 
 def resolve_node_launch_configs(

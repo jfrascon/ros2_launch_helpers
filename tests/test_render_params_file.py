@@ -24,12 +24,10 @@ def test_render_params_file_expands_launch_substitutions(tmp_path):
     ctx = LaunchContext()
     ctx.launch_configurations['robot_prefix'] = 'robot_1_'
 
-    rendered_params_file = rlh.render_params_file(source_path, output_path, ctx)
+    assert rlh.render_params_file(source_path, output_path, ctx) is None
 
     assert output_path.read_text(encoding='utf-8') == (
         '/**/node:\n'
         '  ros__parameters:\n'
         '    frame_id: robot_1_base_link\n'
     )
-
-    assert rendered_params_file == output_path
