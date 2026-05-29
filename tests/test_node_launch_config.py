@@ -1,3 +1,10 @@
+"""
+Test node launch configuration helpers.
+
+These tests verify how ros2_launch_helpers parses node options, logging options, and remapping
+configuration maps into the per-node values passed to launch actions.
+"""
+
 import json
 
 import pytest

@@ -50,7 +50,9 @@ REMAPPINGS_DESC = (
 ################################################################################
 
 
-def set_global_namespace(ctx: LaunchContext, namespace_key: str = 'namespace') -> list[LaunchDescriptionEntity]:
+def set_global_namespace(
+    ctx: LaunchContext, namespace_key: str = 'namespace', output_namespace_key: str = 'namespace'
+) -> list[LaunchDescriptionEntity]:
     """
     Convert the namespace stored in `namespace_key` to an absolute namespace and write it back to
     `namespace_key`.
@@ -59,29 +61,18 @@ def set_global_namespace(ctx: LaunchContext, namespace_key: str = 'namespace') -
     # - 'a/b/c' is converted to /a/b/c, note the first '/' character.
     # - '' is converted to '/'.
 
+    if not is_valid_name(output_namespace_key):
+        raise RuntimeError(f"The output namespace key must be ASCII [A-Za-z0-9_] only: '{output_namespace_key}'")
+
     namespace = LaunchConfiguration(namespace_key).perform(ctx)
-    return [SetLaunchConfiguration(namespace_key, resolve_name('/', namespace))]
-
-
-def set_robot_base_frame(
-    ctx: LaunchContext,
-    local_base_frame: str = 'base_link',
-    robot_prefix_key: str = 'robot_prefix',
-    base_frame_key: str = 'base_frame',
-) -> list[LaunchDescriptionEntity]:
-    """
-    Set the `robot_base_frame_key` in the launch context joining the `robot_prefix` and the
-    `base_frame`.
-    """
-    robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
-    return [SetLaunchConfiguration(base_frame_key, f'{robot_prefix}{local_base_frame}')]
+    return [SetLaunchConfiguration(output_namespace_key, resolve_name('/', namespace))]
 
 
 def set_robot_namespace(
     ctx: LaunchContext,
-    namespace_key: str = 'project_namespace',
+    namespace_key: str = 'namespace',
     robot_name_key: str = 'robot_name',
-    robot_namespace_key: str = 'namespace',
+    robot_namespace_key: str = 'robot_namespace',
 ) -> list[LaunchDescriptionEntity]:
     """
     Set the `robot_namespace_key` in the launch context by resolving the `robot_name` into the
@@ -92,19 +83,6 @@ def set_robot_namespace(
     return [SetLaunchConfiguration(robot_namespace_key, resolve_name(namespace, robot_name))]
 
 
-def set_robot_odometry_frame(
-    ctx: LaunchContext,
-    local_odometry_frame: str = 'odom',
-    robot_prefix_key: str = 'robot_prefix',
-    odometry_frame_key: str = 'odometry_frame',
-) -> list[LaunchDescriptionEntity]:
-    """
-    Set the `odometry_frame_key` in the launch context joining the `robot_prefix` and the `odometry_frame`.
-    """
-    robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
-    return [SetLaunchConfiguration(odometry_frame_key, f'{robot_prefix}{local_odometry_frame}')]
-
-
 def set_robot_prefix(
     ctx: LaunchContext, robot_name_key: str = 'robot_name', robot_prefix_key: str = 'robot_prefix'
 ) -> list[LaunchDescriptionEntity]:
@@ -113,8 +91,39 @@ def set_robot_prefix(
     (e.g., 'robot1' -> 'robot1_')
     """
     robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
+
+    if not is_valid_name(robot_name):
+        raise RuntimeError(f"The robot's name must be ASCII [A-Za-z0-9_] only: '{robot_name}'")
+
     return [SetLaunchConfiguration(robot_prefix_key, to_prefix(robot_name))]
 
+
+# def set_robot_odometry_frame(
+#     ctx: LaunchContext,
+#     local_odometry_frame_key: str = 'local_odometry_frame',
+#     robot_prefix_key: str = 'robot_prefix',
+#     odometry_frame_key: str = 'odometry_frame',
+# ) -> list[LaunchDescriptionEntity]:
+#     """
+#     Set the `odometry_frame_key` in the launch context joining the `robot_prefix` and the `odometry_frame`.
+#     """
+#     local_odometry_frame = LaunchConfiguration(local_odometry_frame_key).perform(ctx)
+#     robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
+#     return [SetLaunchConfiguration(odometry_frame_key, f'{robot_prefix}{local_odometry_frame}')]
+
+
+# def set_robot_base_frame(
+#     ctx: LaunchContext,
+#     local_base_frame: str = 'base_link',
+#     robot_prefix_key: str = 'robot_prefix',
+#     base_frame_key: str = 'base_frame',
+# ) -> list[LaunchDescriptionEntity]:
+#     """
+#     Set the `robot_base_frame_key` in the launch context joining the `robot_prefix` and the
+#     `base_frame`.
+#     """
+#     robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
+#     return [SetLaunchConfiguration(base_frame_key, f'{robot_prefix}{local_base_frame}')]
 
 ################################################################################
 # Functions without access to the context
@@ -357,15 +366,53 @@ def is_valid_namespace(ns: str) -> bool:
 #     return nested, applied, ignored
 
 
+def render_params_file(
+    params_file: Union[str, Path],
+    rendered_params_file: Union[str, Path],
+    ctx: LaunchContext,
+) -> Path:
+    """
+    Render one ROS parameter YAML file and return the rendered file path.
+
+    `params_file` may be a normal filesystem path, a `file://` URI, or a
+    `package://<package>/<path>` URI. The rendered YAML is written to the
+    required `rendered_params_file`.
+
+    `ParameterFile.evaluate()` uses the launch_ros YAML substitution engine. With
+    `allow_substs=True`, it expands expressions such as `$(var robot_name)` using the
+    current launch context and returns the path to a temporary expanded YAML file.
+
+    This function copies the temporary expanded YAML to `rendered_params_file`
+    because `ParameterFile.cleanup()` deletes the temporary file. Callers must decide
+    explicitly whether to store the returned path in the launch context with
+    `SetLaunchConfiguration`.
+    """
+    params_file = Path(resolve_file(params_file))
+
+    if not params_file.is_file():
+        raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
+
+    output_path = Path(rendered_params_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    parameter_file = ParameterFile(str(params_file), allow_substs=True)
+
+    try:
+        evaluated_path = parameter_file.evaluate(ctx)
+        output_path.write_text(Path(evaluated_path).read_text(encoding='utf-8'), encoding='utf-8')
+    finally:
+        parameter_file.cleanup()
+
+    return output_path
+
+
 def resolve_node_launch_configs(
     node_names: List[str],
     node_options: Optional[str],
     node_logging_options: Optional[str],
     node_remappings: Optional[str],
 ) -> Tuple[
-    Dict[str, Dict[str, Union[str, bool, float]]],
-    Dict[str, Optional[List[Tuple[str, str]]]],
-    Dict[str, List[str]],
+    Dict[str, Dict[str, Union[str, bool, float]]], Dict[str, Optional[List[Tuple[str, str]]]], Dict[str, List[str]]
 ]:
     if not isinstance(node_names, list):
         raise ValueError('node_names must be a list of node names')
@@ -374,9 +421,7 @@ def resolve_node_launch_configs(
         _NodeLaunchConfig.validate_node_name(node_name, f'node_names item {index}')
 
     config = _NodeLaunchConfig.from_json_strings(
-        node_options=node_options,
-        node_logging_options=node_logging_options,
-        node_remappings=node_remappings,
+        node_options=node_options, node_logging_options=node_logging_options, node_remappings=node_remappings
     )
 
     node_options_by_name: Dict[str, Dict[str, Union[str, bool, float]]] = {}
@@ -400,18 +445,11 @@ class _NodeLaunchConfig:
 
     _LOG_LEVELS = ('debug', 'info', 'warn', 'error')
     _CUSTOM_LOG_LEVELS = ('debug', 'info', 'warn', 'error', 'fatal')
-    _LOGGING_BOOLEAN_KEYS = (
-        'disable-stdout-logs',
-        'disable-rosout-logs',
-        'disable-external-lib-logs',
-    )
+    _LOGGING_BOOLEAN_KEYS = ('disable-stdout-logs', 'disable-rosout-logs', 'disable-external-lib-logs')
     _OUTPUT_VALUES = ('screen', 'log', 'both')
 
     def __init__(
-        self,
-        node_options: Dict[str, Any],
-        node_logging_options: Dict[str, Any],
-        node_remappings: Dict[str, Any],
+        self, node_options: Dict[str, Any], node_logging_options: Dict[str, Any], node_remappings: Dict[str, Any]
     ) -> None:
         self._node_options = node_options
         self._node_logging_options = node_logging_options
@@ -419,10 +457,7 @@ class _NodeLaunchConfig:
 
     @classmethod
     def from_json_strings(
-        cls,
-        node_options: Optional[str],
-        node_logging_options: Optional[str],
-        node_remappings: Optional[str],
+        cls, node_options: Optional[str], node_logging_options: Optional[str], node_remappings: Optional[str]
     ) -> '_NodeLaunchConfig':
         return cls(
             node_options=cls._parse_json_map(node_options, 'node_options'),
@@ -433,17 +468,13 @@ class _NodeLaunchConfig:
     def logging_ros_arguments_for(self, current_node_name: str) -> List[str]:
         self.validate_node_name(current_node_name, 'current_node_name')
         logging_options: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
-        node_logging_options = self._entry_for(
-            self._node_logging_options, current_node_name, 'node_logging_options'
-        )
+        node_logging_options = self._entry_for(self._node_logging_options, current_node_name, 'node_logging_options')
 
         if node_logging_options is None:
             return self._logging_options_to_ros_args(logging_options)
 
         if not isinstance(node_logging_options, dict):
-            raise ValueError(
-                f"node_logging_options entry for node '{current_node_name}' must be a JSON object"
-            )
+            raise ValueError(f"node_logging_options entry for node '{current_node_name}' must be a JSON object")
 
         for key, value in node_logging_options.items():
             if not isinstance(key, str) or not key:
@@ -500,9 +531,7 @@ class _NodeLaunchConfig:
         remappings: List[Tuple[str, str]] = []
         for index, remapping in enumerate(node_remappings):
             if not isinstance(remapping, str):
-                raise ValueError(
-                    f"node_remappings item {index} for node '{current_node_name}' must be a string"
-                )
+                raise ValueError(f"node_remappings item {index} for node '{current_node_name}' must be a string")
 
             try:
                 original_topic, new_topic = remapping.split(':=', maxsplit=1)
@@ -584,8 +613,7 @@ class _NodeLaunchConfig:
         level = cls._validate_string(value, 'node_logging_options', current_node_name, key).lower()
         if level not in cls._CUSTOM_LOG_LEVELS:
             raise ValueError(
-                f"node_logging_options custom logger '{key}' for node '{current_node_name}' has invalid level "
-                f"'{value}'"
+                f"node_logging_options custom logger '{key}' for node '{current_node_name}' has invalid level '{value}'"
             )
 
         return level
@@ -594,9 +622,7 @@ class _NodeLaunchConfig:
     def _validate_log_level(cls, value: Any, current_node_name: str, key: str) -> str:
         level = cls._validate_string(value, 'node_logging_options', current_node_name, key).lower()
         if level not in cls._LOG_LEVELS:
-            raise ValueError(
-                f"node_logging_options '{key}' for node '{current_node_name}' has invalid level '{value}'"
-            )
+            raise ValueError(f"node_logging_options '{key}' for node '{current_node_name}' has invalid level '{value}'")
 
         return level
 
