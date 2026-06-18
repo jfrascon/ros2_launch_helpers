@@ -44,6 +44,25 @@ REMAPPINGS_DESC = (
     'remapping strings using the "from:=to" syntax.'
 )
 
+
+class FileResolutionError(ValueError):
+    """
+    Base exception for failures while converting a file path or URI into a filesystem path.
+    """
+
+
+class NullFilePathError(FileResolutionError):
+    """
+    Raised when a file path or URI is required but the provided value is empty.
+    """
+
+
+class InvalidFileUriPatternError(FileResolutionError):
+    """
+    Raised when a file URI does not follow one of the URI formats accepted by ``resolve_file``.
+    """
+
+
 ################################################################################
 # Functions that can be passed as argument to OpaqueFunction.
 # (Context access available)
@@ -367,25 +386,35 @@ def is_valid_namespace(ns: str) -> bool:
 
 
 def render_params_file(
-    params_file: Union[str, Path],
-    rendered_params_file: Union[str, Path],
-    ctx: LaunchContext,
+    params_file: Union[str, Path], rendered_params_file: Union[str, Path], ctx: LaunchContext
 ) -> None:
     """
     Render one ROS parameter YAML file.
 
-    `params_file` may be a normal filesystem path, a `file://` URI, or a
-    `package://<package>/<path>` URI. The rendered YAML is written to the
-    required `rendered_params_file`.
+    `params_file` may be a normal filesystem path, a `file://` URI, or a `package://<package>/<path>` URI.
+    The rendered YAML is written to the required `rendered_params_file`.
 
-    `ParameterFile.evaluate()` uses the launch_ros YAML substitution engine. With
-    `allow_substs=True`, it expands expressions such as `$(var robot_name)` using the
-    current launch context and returns the path to a temporary expanded YAML file.
+    `ParameterFile.evaluate()` uses the launch_ros YAML substitution engine. With `allow_substs=True`, it expands
+    expressions such as `$(var robot_name)` using the current launch context and returns the path to a temporary
+    expanded YAML file.
 
-    This function copies the temporary expanded YAML to `rendered_params_file`
-    because `ParameterFile.cleanup()` deletes the temporary file. Callers must decide
-    explicitly whether to store that path in the launch context with
+    This function copies the temporary expanded YAML to `rendered_params_file` because `ParameterFile.cleanup()` deletes
+    the temporary file. Callers must decide explicitly whether to store that path in the launch context with
     `SetLaunchConfiguration`.
+
+    :param params_file: Path or URI (package://, file://, or regular path) to the ROS parameter YAML file.
+    :param rendered_params_file: Filesystem path where the rendered YAML file will be written.
+    :param ctx: Launch context used to evaluate substitutions in the parameter YAML file.
+    :return: None.
+    :raises NullFilePathError: If no params file path or URI is provided.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    :raises FileNotFoundError: If the resolved params file path does not point to a file.
+    :raises OSError: If the output directory cannot be created, or if the temporary or output file cannot be read
+        or written.
+    :raises UnicodeDecodeError: If the evaluated temporary YAML file is not valid UTF-8.
+    :raises Exception: If ``launch_ros.parameter_descriptions.ParameterFile.evaluate`` fails while expanding
+        substitutions.
     """
     params_file = Path(resolve_file(params_file))
 
@@ -655,40 +684,29 @@ class _NodeLaunchConfig:
         return value
 
 
-def read_yaml_file(yaml_file: Union[str, Path]) -> Tuple[str, Any]:
+def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
     """
     Read and parse a YAML file, returning both the resolved path and the loaded object.
 
     :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
     :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be ``None``
         when the file contains only comments/whitespace.
-    :raises ValueError: If the input path is invalid, the file cannot be found/read, or YAML syntax is invalid.
+    :raises NullFilePathError: If no YAML file path or URI is provided.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    :raises FileNotFoundError: If the resolved path does not point to a file.
+    :raises yaml.YAMLError: If the YAML syntax is invalid.
+    :raises OSError: If the file cannot be read.
+    :raises UnicodeDecodeError: If the file is not valid UTF-8.
     """
-    yaml_file = str(yaml_file).strip()
-
-    if not yaml_file:
-        raise ValueError('YAML file not provided')
-
-    # Resolve URI formats (package://, file://) and expand '~' for regular filesystem paths.
-    try:
-        resolved_yaml_file = resolve_file(yaml_file)
-    except Exception as e:
-        raise ValueError(f"Failed to resolve YAML file '{yaml_file}': {e}") from e
-
+    resolved_yaml_file = resolve_file(yaml_file)
     resolved_yaml_path = Path(resolved_yaml_file)
 
     if not resolved_yaml_path.is_file():
-        raise ValueError(f"File '{resolved_yaml_file}' does not exist")
+        raise FileNotFoundError(f"Path '{resolved_yaml_file}' does not point to a file")
 
-    try:
-        with resolved_yaml_path.open('r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML syntax in file '{resolved_yaml_file}': {e}") from e
-    except (OSError, UnicodeDecodeError) as e:
-        raise ValueError(f"Failed to read file '{resolved_yaml_file}': {e}") from e
-    except Exception as e:
-        raise ValueError(f"Unexpected error reading YAML file '{resolved_yaml_file}': {e}") from e
+    with resolved_yaml_path.open('r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
 
     return (resolved_yaml_file, data)
 
@@ -714,33 +732,55 @@ def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
 
 
 def resolve_file(file: Optional[Union[str, Path]]) -> str:
+    """
+    Resolve one regular path, ``file://`` URI, or ``package://`` URI to a filesystem path.
+
+    Regular paths are returned after ``~`` expansion. The path does not have to exist; callers that
+    need an existing file should check that separately after resolution.
+
+    :param file: Regular path, ``file://`` URI, or ``package://<package>/<path>`` URI.
+    :return: Resolved filesystem path.
+    :raises NullFilePathError: If no file path or URI is provided.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    """
     if file is None:
-        return ''
+        raise NullFilePathError('File path or URI not provided')
 
     file = str(file).strip()
 
     if not file:
-        return ''
+        raise NullFilePathError('File path or URI not provided')
 
     if file.startswith('package://'):
         rest = file[len('package://') :]
 
         if '/' not in rest:
-            raise ValueError(f"File URI must be 'package://<pkg>/<path>' (got: '{file}')")
+            raise InvalidFileUriPatternError(f"Package URI must be 'package://<package>/<path>' (got: '{file}')")
 
         pkg, relative_file = rest.split('/', 1)
-        # Raises 'PackageNotFoundError' if the package is not found.
-        # Raises 'ValueError' if the package name is invalid.
-        parent_path = get_package_share_directory(pkg)
+
+        if not pkg or not relative_file:
+            raise InvalidFileUriPatternError(f"Package URI must be 'package://<package>/<path>' (got: '{file}')")
+
+        try:
+            parent_path = get_package_share_directory(pkg)
+        except ValueError as e:
+            raise InvalidFileUriPatternError(f"Package URI contains an invalid package name (got: '{file}')") from e
+
         return os.path.join(parent_path, relative_file)
 
     if file.startswith('file://'):
         resolved_file = os.path.expanduser(file[len('file://') :])
 
         if not os.path.isabs(resolved_file):
-            raise ValueError(f"File URI must point to an absolute path (got: '{resolved_file}')")
+            raise InvalidFileUriPatternError(f"File URI must point to an absolute path (got: '{resolved_file}')")
 
         return resolved_file
+
+    if '://' in file:
+        scheme = file.split('://', 1)[0]
+        raise InvalidFileUriPatternError(f"Unsupported file URI scheme '{scheme}' in '{file}'")
 
     # If none of the special URI formats matched, return the original string with user expansion, if
     # possible.

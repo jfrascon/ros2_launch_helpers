@@ -1,9 +1,14 @@
+from ament_index_python.packages import PackageNotFoundError
+
 from .helpers import (
     DEFAULT_LOGGING_OPTIONS,
     DEFAULT_NODE_OPTIONS,
     LOGGING_OPTIONS_DESC,
     NODE_OPTIONS_DESC,
     REMAPPINGS_DESC,
+    FileResolutionError,
+    InvalidFileUriPatternError,
+    NullFilePathError,
     default_node_logging_options_json_str,
     default_node_options_json_str,
     default_node_remappings_json_str,
@@ -28,8 +33,12 @@ from .version import __version__
 __all__ = [
     'DEFAULT_LOGGING_OPTIONS',
     'DEFAULT_NODE_OPTIONS',
+    'NullFilePathError',
+    'FileResolutionError',
+    'InvalidFileUriPatternError',
     'LOGGING_OPTIONS_DESC',
     'NODE_OPTIONS_DESC',
+    'PackageNotFoundError',
     'REMAPPINGS_DESC',
     'default_node_logging_options_json_str',
     'default_node_options_json_str',
