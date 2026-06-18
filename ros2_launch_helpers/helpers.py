@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
@@ -10,6 +11,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescriptionEntity
 from launch.actions import LogInfo, SetLaunchConfiguration
 from launch.substitutions import LaunchConfiguration
+from launch.utilities.type_utils import normalize_typed_substitution, perform_typed_substitution
 from launch_ros.parameter_descriptions import ParameterFile
 
 DEFAULT_LOGGING_OPTIONS = {
@@ -431,6 +433,54 @@ def render_params_file(
         output_path.write_text(Path(evaluated_path).read_text(encoding='utf-8'), encoding='utf-8')
     finally:
         parameter_file.cleanup()
+
+
+def process_params_file(
+    ctx: LaunchContext,
+    params_file_key: str = 'params_file',
+    params_file_allow_substs_key: str = 'params_file_allow_substs',
+) -> list[LaunchDescriptionEntity]:
+    """
+    Resolve or render one ROS parameter file and update the launch context with the final path.
+
+    This helper is intended for launch files that pass the same parameter YAML to several child launch files or nodes.
+    The input path is read from ``LaunchConfiguration(params_file_key)``. If
+    ``LaunchConfiguration(params_file_allow_substs_key)`` is false, this function only resolves the path and stores the
+    resolved path back in ``params_file_key``. If the allow-substitutions flag is true, this function expands launch
+    substitutions in the YAML file through :func:`render_params_file`, writes the rendered YAML to a temporary file, and
+    stores that rendered file path back in ``params_file_key``.
+
+    The caller must ensure that every ``$(var key)`` referenced by the selected parameter file exists in the launch
+    context before this function runs.
+
+    :param ctx: Current launch context.
+    :param params_file_key: Launch configuration key that contains the parameter file path and receives the final path.
+    :param params_file_allow_substs_key: Launch configuration key that controls whether substitutions are expanded.
+    :return: List with one ``SetLaunchConfiguration`` action that updates ``params_file_key``.
+    :raises NullFilePathError: If no parameter file path or URI is provided.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    :raises FileNotFoundError: If the resolved parameter file path does not point to a file.
+    :raises OSError: If the rendered temporary file cannot be written.
+    """
+    params_file = resolve_file(LaunchConfiguration(params_file_key).perform(ctx))
+
+    if not Path(params_file).is_file():
+        raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
+
+    params_file_allow_substs = perform_typed_substitution(
+        ctx, normalize_typed_substitution(LaunchConfiguration(params_file_allow_substs_key), bool), bool
+    )
+
+    if not params_file_allow_substs:
+        return [SetLaunchConfiguration(params_file_key, params_file)]
+
+    flattened_namespace = str(ctx.launch_configurations.get('robot_namespace', '')).strip('/').replace('/', '_')
+    rendered_params_file = Path(gettempdir()).joinpath(f'{flattened_namespace}_robot_params.yaml')
+
+    render_params_file(params_file, rendered_params_file, ctx)
+
+    return [SetLaunchConfiguration(params_file_key, str(rendered_params_file))]
 
 
 def resolve_node_launch_configs(
