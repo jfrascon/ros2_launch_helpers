@@ -1,8 +1,8 @@
 """
 Test file path and URI resolution helpers.
 
-These tests verify that resolve_file resolves supported inputs and raises distinct exception types for
-each resolution failure that callers may want to handle differently.
+These tests verify that resolve_file resolves supported inputs and raises distinct exception types
+for each resolution failure that callers may want to handle differently.
 """
 
 from pathlib import Path

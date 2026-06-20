@@ -7,19 +7,15 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
-
-# from benedict import benedict
 from launch import LaunchContext, LaunchDescriptionEntity
-from launch.actions import LogInfo, SetLaunchConfiguration
-from launch.substitutions import LaunchConfiguration
-from launch.utilities.type_utils import normalize_typed_substitution, perform_typed_substitution
+from launch.actions import LogInfo
 from launch_ros.parameter_descriptions import ParameterFile
 
 DEFAULT_LOGGING_OPTIONS = {
     'log-level': 'info',  # One of: 'debug', 'info', 'warn', 'error'
     'disable-stdout-logs': False,  # Whether to disable writing log messages to the console
     'disable-rosout-logs': False,  # Whether to disable writing log messages out to /rosout
-    'disable-external-lib-logs': False,  # Whether to completely disable the use of an external logger
+    'disable-external-lib-logs': False,  # Whether to completely disable external loggers
 }
 
 
@@ -31,7 +27,7 @@ LOGGING_OPTIONS_DESC = (
 
 DEFAULT_NODE_OPTIONS = {
     'output': 'screen',  # One of: 'screen', 'log', 'both'
-    'emulate_tty': True,  # Whether to emulate a TTY for the node's stdout/stderr (usually True for 'screen' or 'both')
+    'emulate_tty': True,  # Whether to emulate a TTY for the node's stdout/stderr
     'respawn': False,  # Whether to respawn the node if it dies
     'respawn_delay': 0.0,  # Delay in seconds before respawning a node
 }
@@ -66,92 +62,6 @@ class InvalidFileUriPatternError(FileResolutionError):
     """
 
 
-################################################################################
-# Functions that can be passed as argument to OpaqueFunction.
-# (Context access available)
-################################################################################
-
-
-def set_global_namespace(
-    ctx: LaunchContext, namespace_key: str = 'namespace', output_namespace_key: str = 'namespace'
-) -> list[LaunchDescriptionEntity]:
-    """
-    Convert the namespace stored in `namespace_key` to an absolute namespace and write it back to
-    `namespace_key`.
-    """
-    # For example:
-    # - 'a/b/c' is converted to /a/b/c, note the first '/' character.
-    # - '' is converted to '/'.
-
-    if not is_valid_name(output_namespace_key):
-        raise RuntimeError(f"The output namespace key must be ASCII [A-Za-z0-9_] only: '{output_namespace_key}'")
-
-    namespace = LaunchConfiguration(namespace_key).perform(ctx)
-    return [SetLaunchConfiguration(output_namespace_key, resolve_name('/', namespace))]
-
-
-def set_robot_namespace(
-    ctx: LaunchContext,
-    namespace_key: str = 'namespace',
-    robot_name_key: str = 'robot_name',
-    robot_namespace_key: str = 'robot_namespace',
-) -> list[LaunchDescriptionEntity]:
-    """
-    Set the `robot_namespace_key` in the launch context by resolving the `robot_name` into the
-    `namespace`.
-    """
-    namespace = LaunchConfiguration(namespace_key).perform(ctx)
-    robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-    return [SetLaunchConfiguration(robot_namespace_key, resolve_name(namespace, robot_name))]
-
-
-def set_robot_prefix(
-    ctx: LaunchContext, robot_name_key: str = 'robot_name', robot_prefix_key: str = 'robot_prefix'
-) -> list[LaunchDescriptionEntity]:
-    """
-    Set the 'robot_prefix_key' in the launch context by converting the 'robot_name' into a prefix format
-    (e.g., 'robot1' -> 'robot1_')
-    """
-    robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-
-    if not is_valid_name(robot_name):
-        raise RuntimeError(f"The robot's name must be ASCII [A-Za-z0-9_] only: '{robot_name}'")
-
-    return [SetLaunchConfiguration(robot_prefix_key, to_prefix(robot_name))]
-
-
-# def set_robot_odometry_frame(
-#     ctx: LaunchContext,
-#     local_odometry_frame_key: str = 'local_odometry_frame',
-#     robot_prefix_key: str = 'robot_prefix',
-#     odometry_frame_key: str = 'odometry_frame',
-# ) -> list[LaunchDescriptionEntity]:
-#     """
-#     Set the `odometry_frame_key` in the launch context joining the `robot_prefix` and the `odometry_frame`.
-#     """
-#     local_odometry_frame = LaunchConfiguration(local_odometry_frame_key).perform(ctx)
-#     robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
-#     return [SetLaunchConfiguration(odometry_frame_key, f'{robot_prefix}{local_odometry_frame}')]
-
-
-# def set_robot_base_frame(
-#     ctx: LaunchContext,
-#     local_base_frame: str = 'base_link',
-#     robot_prefix_key: str = 'robot_prefix',
-#     base_frame_key: str = 'base_frame',
-# ) -> list[LaunchDescriptionEntity]:
-#     """
-#     Set the `robot_base_frame_key` in the launch context joining the `robot_prefix` and the
-#     `base_frame`.
-#     """
-#     robot_prefix = LaunchConfiguration(robot_prefix_key).perform(ctx)
-#     return [SetLaunchConfiguration(base_frame_key, f'{robot_prefix}{local_base_frame}')]
-
-################################################################################
-# Functions without access to the context
-################################################################################
-
-
 def default_node_logging_options_json_str() -> str:
     return '{}'
 
@@ -162,6 +72,32 @@ def default_node_options_json_str() -> str:
 
 def default_node_remappings_json_str() -> str:
     return '{}'
+
+
+def compute_global_namespace(namespace: str) -> str:
+    """
+    Resolve one launch namespace argument as an absolute namespace.
+
+    This helper contains only the namespace rule. Launch actions are responsible for reading the
+    input value from the launch context and writing the result back to the launch context.
+    """
+    return resolve_name('/', namespace)
+
+
+def compute_robot_namespace(namespace: str, robot_name: str) -> str:
+    """
+    Resolve one robot name inside a parent namespace.
+
+    This helper keeps the naming rule independent from ROS launch runtime concerns.
+    """
+    return resolve_name(namespace, robot_name)
+
+
+def compute_robot_prefix(robot_name: str) -> str:
+    """
+    Convert one robot name into the prefix used for frame and topic names.
+    """
+    return to_prefix(robot_name)
 
 
 def flatten_namespace(namespace: str, new_sep: str) -> str:
@@ -187,7 +123,8 @@ def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list
     """
     Build the parameters field with a base parameter file and optional files overlaying it.
     :param params_file: Path to the base YAML file with ros__parameters (required).
-    :param overlay_params_file_list: Comma-separated list of YAML files to overlay (optional, default: '').
+    :param overlay_params_file_list: Comma-separated list of YAML files to overlay (optional,
+        default: '').
     :return: List of ParameterFile objects to be passed to the 'parameters' field of a Node.
     """
     params_file = params_file.strip()
@@ -223,7 +160,6 @@ def is_valid_name(s: str) -> bool:
     Returns:
         - True  -> all characters are valid (ASCII alnum or underscore) and length is valid.
         - False -> at least one invalid character found.
-        - None  -> input is empty; considered 'not evaluable' at this level.
 
     Notes:
         - Rules match ROS 2 node name validation (Humble):
@@ -265,13 +201,13 @@ def is_valid_namespace(ns: str) -> bool:
     if ns in ('', '/'):
         return True
 
-    # When two or more slashes are contiguos, when you split the string by '/', you get empty segments.
+    # When two or more slashes are contiguous, splitting the string by '/' produces empty segments.
     # For example:
     # 'ns1//ns2'   -> ['ns1', '', 'ns2'] --> two or more '/' in a row
     # '/ns1//ns2/' -> ['', 'ns1', '', 'ns2', ''] -> the first and last are false positives.
 
-    # In order to check if there are two or more '/' in a row, we need to first remove the leading and trailing slashes
-    # if present.
+    # To check if there are two or more '/' in a row, first remove the leading and trailing
+    # slashes if present.
 
     # Remove EXACTLY ONE leading slash.
     if ns.startswith('/'):
@@ -281,154 +217,61 @@ def is_valid_namespace(ns: str) -> bool:
     if ns.endswith('/'):
         ns = ns[:-1]
 
-    # If ns is '//', after removing leading and trailing slashes, it becomes '', which is an invalid namespace.
+    # If ns is '//', removing leading and trailing slashes produces '', which is invalid.
     if not ns:
         return False
 
     # Examples at this point:
-    # '/ns1//ns2/' -> 'ns1//ns2' -> ['ns1', '', 'ns2'] -> two or more '/' in a row, this is an error.
+    # '/ns1//ns2/' -> 'ns1//ns2' -> ['ns1', '', 'ns2'] -> two or more '/' in a row.
     # But
-    # '/ns1/ns2/'  -> 'ns1/ns2'  -> ['ns1', 'ns2']  -> OK. The leadind and trailing slashes are OK, although the
-    #                                                      trailing slash is not necessary.
+    # '/ns1/ns2/'  -> 'ns1/ns2'  -> ['ns1', 'ns2'] -> OK. Leading and trailing
+    # slashes are accepted, although the trailing slash is not necessary.
 
     items = ns.split('/')
 
     for item in items:
         # Empty items means two or more '/' in a row, so this is an error.
-        # Technically, we could have removed this 'if not item' check, since 'is_valid_name' would return False for
-        # empty strings, but this way we can provide a more specific error message.
+        # Technically, this check is redundant because 'is_valid_name' returns False for empty
+        # strings, but keeping it here makes the namespace rule explicit.
         if not item:
             return False
 
-        # Check the item is in valid, which means ASCII alnum or underscore only, [A-Za-z0-9_].
+        # Check the item is valid, which means ASCII alnum or underscore only, [A-Za-z0-9_].
         if not is_valid_name(item):
             return False
 
     return True
 
 
-# def merge_yaml_maps_strict(
-#     defaults: Mapping[str, Any],
-#     override: Mapping[str, Any],
-#     keypath_sep: str = '§',
-#     flat_sep: str = '.',
-#     allow_none: bool = True,
-#     numeric_compat: bool = False,
-# ) -> Tuple[Dict[str, Any], List, List]:
-#     def same_type(a, b, numeric_compat: bool = False) -> bool:
-#         """
-#         Return True if 'b' is allowed to override 'a' according to type rules.
-
-#         Rules:
-#         1) Exact type match passes (type(a) is type(b)).
-#         2) If numeric_compat is True, allow int <-> float interchange,
-#             but never allow bool (since bool is a subclass of int in Python).
-#         3) Otherwise, types must match exactly.
-
-#         Examples:
-#         same_type(3, 7) -> True
-#         same_type(3, 7.0) -> False
-#         same_type(3, 7.0, numeric_compat=True) -> True
-#         same_type(True, 1, numeric_compat=True) -> False  # bool explicitly excluded
-#         same_type([1], [2]) -> True
-#         same_type([1], "x") -> False
-#         """
-#         if type(a) is type(b):
-#             return True
-
-#         # Optional numeric compatibility (int <-> float), but exclude bool explicitly.
-#         # 'numbers.Real' captures int and float and bool, so we must filter bool out.
-#         if numeric_compat and isinstance(a, numbers.Real) and isinstance(b, numbers.Real):
-#             return not isinstance(a, bool) and not isinstance(b, bool)
-
-#         # All other combinations are not allowed.
-#         return False
-
-#     # Wrap with benedict using a keypath separator that doesn't appear in keys
-#     d = benedict(defaults, keypath_separator=keypath_sep)
-#     o = benedict(override, keypath_separator=keypath_sep)
-
-#     # Flatten both with dotted paths (independent from keypath sep)
-#     d_flatten = d.flatten(flat_sep)
-#     o_flatten = o.flatten(flat_sep)
-
-#     merged_flat = {}
-#     applied = []
-#     ignored = []
-
-#     # Walk only default keys -> overlay strict
-#     for dk, dv in d_flatten.items():
-#         if dk in o_flatten:
-#             ov = o_flatten[dk]
-#             # Allow None values if specified
-#             if ov is None:
-#                 if allow_none:
-#                     merged_flat[dk] = None
-#                     applied.append(dk)
-#                 else:
-#                     # Treat None as 'missing override': inherit default and record as ignored
-#                     merged_flat[dk] = dv
-#                     ignored.append(dk)
-#                 continue
-
-#             if not same_type(dv, ov, numeric_compat):
-#                 raise TypeError(f'{dk}: type mismatch (default={type(dv).__name__}, override={type(ov).__name__})')
-
-#             # Lists replace lists; scalars replace scalars – both covered by type check
-#             merged_flat[dk] = ov
-#             applied.append(dk)
-#         else:
-#             merged_flat[dk] = dv
-
-#     # Collect extras from override (ignored by design)
-#     for ok in o_flatten.keys():
-#         if ok not in d_flatten:
-#             ignored.append(ok)
-
-#     # Rebuild nested dict
-#     nested = benedict(merged_flat, keypath_separator=keypath_sep).unflatten(separator=flat_sep)
-
-#     return nested, applied, ignored
-
-
-def render_params_file(
-    params_file: Union[str, Path], rendered_params_file: Union[str, Path], ctx: LaunchContext
-) -> None:
+def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str:
     """
     Render one ROS parameter YAML file.
 
-    `params_file` may be a normal filesystem path, a `file://` URI, or a `package://<package>/<path>` URI.
-    The rendered YAML is written to the required `rendered_params_file`.
+    `params_file` must be a resolved filesystem path.
 
-    `ParameterFile.evaluate()` uses the launch_ros YAML substitution engine. With `allow_substs=True`, it expands
-    expressions such as `$(var robot_name)` using the current launch context and returns the path to a temporary
-    expanded YAML file.
+    `ParameterFile.evaluate()` uses the launch_ros YAML substitution engine. With
+    `allow_substs=True`, it expands expressions such as `$(var robot_name)` using the current
+    launch context and returns the path to a temporary expanded YAML file.
 
-    This function copies the temporary expanded YAML to `rendered_params_file` because `ParameterFile.cleanup()` deletes
-    the temporary file. Callers must decide explicitly whether to store that path in the launch context with
-    `SetLaunchConfiguration`.
+    This function copies the temporary expanded YAML to a new temporary file because
+    `ParameterFile.cleanup()` deletes the file returned by `ParameterFile.evaluate()`.
 
-    :param params_file: Path or URI (package://, file://, or regular path) to the ROS parameter YAML file.
-    :param rendered_params_file: Filesystem path where the rendered YAML file will be written.
+    :param params_file: Resolved filesystem path to the ROS parameter YAML file.
     :param ctx: Launch context used to evaluate substitutions in the parameter YAML file.
-    :return: None.
-    :raises NullFilePathError: If no params file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    :return: Filesystem path to the rendered YAML file.
     :raises FileNotFoundError: If the resolved params file path does not point to a file.
-    :raises OSError: If the output directory cannot be created, or if the temporary or output file cannot be read
-        or written.
+    :raises OSError: If the output directory cannot be created, or if the temporary or output file
+        cannot be read or written.
     :raises UnicodeDecodeError: If the evaluated temporary YAML file is not valid UTF-8.
-    :raises Exception: If ``launch_ros.parameter_descriptions.ParameterFile.evaluate`` fails while expanding
-        substitutions.
+    :raises Exception: If ``launch_ros.parameter_descriptions.ParameterFile.evaluate`` fails while
+        expanding substitutions.
     """
-    params_file = Path(resolve_file(params_file))
+    params_file = Path(params_file)
 
     if not params_file.is_file():
         raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
 
-    output_path = Path(rendered_params_file)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path = _make_rendered_params_file_path()
 
     parameter_file = ParameterFile(str(params_file), allow_substs=True)
 
@@ -438,56 +281,18 @@ def render_params_file(
     finally:
         parameter_file.cleanup()
 
+    return str(output_path)
 
-def process_params_file(
-    ctx: LaunchContext,
-    params_file_key: str = 'params_file',
-    params_file_allow_substs_key: str = 'params_file_allow_substs',
-) -> list[LaunchDescriptionEntity]:
+
+def _make_rendered_params_file_path() -> Path:
     """
-    Resolve or render one ROS parameter file and update the launch context with the final path.
+    Create a unique temporary YAML path for rendered ROS params.
 
-    This helper is intended for launch files that pass the same parameter YAML to several child launch files or nodes.
-    The input path is read from ``LaunchConfiguration(params_file_key)``. If
-    ``LaunchConfiguration(params_file_allow_substs_key)`` is false, this function only resolves the path and stores the
-    resolved path back in ``params_file_key``. If the allow-substitutions flag is true, this function expands launch
-    substitutions in the YAML file through :func:`render_params_file`, writes the rendered YAML to a temporary file, and
-    stores that rendered file path back in ``params_file_key``.
-
-    The caller must ensure that every ``$(var key)`` referenced by the selected parameter file exists in the launch
-    context before this function runs.
-
-    :param ctx: Current launch context.
-    :param params_file_key: Launch configuration key that contains the parameter file path and receives the final path.
-    :param params_file_allow_substs_key: Launch configuration key that controls whether substitutions are expanded.
-    :return: List with one ``SetLaunchConfiguration`` action that updates ``params_file_key``.
-    :raises NullFilePathError: If no parameter file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
-    :raises FileNotFoundError: If the resolved parameter file path does not point to a file.
-    :raises OSError: If the rendered temporary file cannot be written.
+    The file is created immediately so concurrent launches cannot choose the same path. The caller
+    can overwrite it with the rendered YAML content.
     """
-    params_file = resolve_file(LaunchConfiguration(params_file_key).perform(ctx))
-
-    if not Path(params_file).is_file():
-        raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
-
-    params_file_allow_substs = perform_typed_substitution(
-        ctx, normalize_typed_substitution(LaunchConfiguration(params_file_allow_substs_key), bool), bool
-    )
-
-    if not params_file_allow_substs:
-        return [SetLaunchConfiguration(params_file_key, params_file)]
-
-    flattened_namespace = str(ctx.launch_configurations.get('robot_namespace', '')).strip('/').replace('/', '_')
-    temp_file_prefix = f'{flattened_namespace}_robot_params_' if flattened_namespace else 'robot_params_'
-
-    with NamedTemporaryFile(prefix=temp_file_prefix, suffix='.yaml', delete=False) as temp_file:
-        rendered_params_file = Path(temp_file.name)
-
-    render_params_file(params_file, rendered_params_file, ctx)
-
-    return [SetLaunchConfiguration(params_file_key, str(rendered_params_file))]
+    with NamedTemporaryFile(prefix='robot_params_', suffix='.yaml', delete=False) as temp_file:
+        return Path(temp_file.name)
 
 
 def resolve_node_launch_configs(
@@ -753,11 +558,13 @@ def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
     Read and parse a YAML file, returning both the resolved path and the loaded object.
 
     :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
-    :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be ``None``
-        when the file contains only comments/whitespace.
+    :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be
+        ``None`` when the file contains only comments/whitespace.
     :raises NullFilePathError: If no YAML file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI
+        formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package
+        index.
     :raises FileNotFoundError: If the resolved path does not point to a file.
     :raises yaml.YAMLError: If the YAML syntax is invalid.
     :raises OSError: If the file cannot be read.
@@ -779,8 +586,8 @@ def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
     """
     Replace each '/' separator in a namespace with `new_sep`.
 
-    This function performs the replacement on the namespace string itself. It does not remove a leading
-    '/' or a trailing '/'. For example, '/' becomes `new_sep`, and '/ns1/ns2/' becomes
+    This function performs the replacement on the namespace string itself. It does not remove a
+    leading '/' or a trailing '/'. For example, '/' becomes `new_sep`, and '/ns1/ns2/' becomes
     '<new_sep>ns1<new_sep>ns2<new_sep>'.
     """
     if not isinstance(namespace, str):
@@ -805,8 +612,10 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
     :param file: Regular path, ``file://`` URI, or ``package://<package>/<path>`` URI.
     :return: Resolved filesystem path.
     :raises NullFilePathError: If no file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package index.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI
+        formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package
+        index.
     """
     if file is None:
         raise NullFilePathError('File path or URI not provided')
@@ -904,17 +713,6 @@ def resolve_name(parent_namespace: str, child_name: str) -> str:
     # If here, a possible '/' is stripped off the end of the parent namespace, and the child
     # namespace is concatenated to it with a '/' in between.
     return parent_namespace.rstrip('/') + '/' + child_name.rstrip('/')
-
-
-# def set_robot_prefix(ctx: LaunchContext, robot_name_key: str = 'robot_name') -> list[LaunchDescriptionEntity]:
-#     """
-#     Set the 'robot_prefix' LaunchConfiguration by creating it from 'robot_name'.
-#     :param ctx: Launch context.
-#     :param robot_name_key: Key for the robot name LaunchConfiguration (default: 'robot_name').
-#     :return: List with a SetLaunchConfiguration for 'robot_prefix'.
-#     """
-#     robot_name = LaunchConfiguration(robot_name_key).perform(ctx)
-#     return [SetLaunchConfiguration('robot_prefix', create_robot_prefix(robot_name))]
 
 
 def to_prefix(name: str) -> str:

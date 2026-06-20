@@ -222,9 +222,13 @@ def test_invalid_node_names_raise_value_error():
 def test_old_api_is_not_exported():
     assert not hasattr(rlh, 'default_node_options_str')
     assert not hasattr(rlh, 'default_logging_options_str')
+    assert not hasattr(rlh, 'process_params_file')
     assert not hasattr(rlh, 'process_node_options')
     assert not hasattr(rlh, 'process_node_logging_options')
     assert not hasattr(rlh, 'process_remappings')
+    assert not hasattr(rlh, 'set_global_namespace')
+    assert not hasattr(rlh, 'set_robot_namespace')
+    assert not hasattr(rlh, 'set_robot_prefix')
     assert not hasattr(rlh, 'default_node_names_json_str')
     assert not hasattr(rlh, 'NODE_NAMES_DESC')
     assert not hasattr(rlh, 'NodeLaunchConfig')
