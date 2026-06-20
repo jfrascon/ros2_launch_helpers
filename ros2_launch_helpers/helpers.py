@@ -1,7 +1,8 @@
 import json
+import math
 import os
 from pathlib import Path
-from tempfile import gettempdir
+from tempfile import NamedTemporaryFile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
@@ -258,6 +259,9 @@ def is_valid_namespace(ns: str) -> bool:
     - Reject empty segments (no '//' allowed at any position).
     - Each non-empty segment must be valid, i.e., ASCII alnum or underscore only, [A-Za-z0-9_].
     """
+    if not isinstance(ns, str):
+        return False
+
     if ns in ('', '/'):
         return True
 
@@ -476,7 +480,10 @@ def process_params_file(
         return [SetLaunchConfiguration(params_file_key, params_file)]
 
     flattened_namespace = str(ctx.launch_configurations.get('robot_namespace', '')).strip('/').replace('/', '_')
-    rendered_params_file = Path(gettempdir()).joinpath(f'{flattened_namespace}_robot_params.yaml')
+    temp_file_prefix = f'{flattened_namespace}_robot_params_' if flattened_namespace else 'robot_params_'
+
+    with NamedTemporaryFile(prefix=temp_file_prefix, suffix='.yaml', delete=False) as temp_file:
+        rendered_params_file = Path(temp_file.name)
 
     render_params_file(params_file, rendered_params_file, ctx)
 
@@ -716,7 +723,14 @@ class _NodeLaunchConfig:
         if isinstance(value, bool) or not isinstance(value, (float, int)):
             raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a number")
 
-        return float(value)
+        numeric_value = float(value)
+        if not math.isfinite(numeric_value) or numeric_value < 0:
+            raise ValueError(
+                f"{field_name} '{key}' for node '{current_node_name}' must be a finite number "
+                'greater than or equal to 0'
+            )
+
+        return numeric_value
 
     @classmethod
     def _validate_output(cls, value: Any, current_node_name: str) -> str:
@@ -818,7 +832,15 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
         except ValueError as e:
             raise InvalidFileUriPatternError(f"Package URI contains an invalid package name (got: '{file}')") from e
 
-        return os.path.join(parent_path, relative_file)
+        parent_path = Path(parent_path).resolve()
+        resolved_file = parent_path.joinpath(relative_file).resolve()
+
+        if not resolved_file.is_relative_to(parent_path):
+            raise InvalidFileUriPatternError(
+                f"Package URI path must stay inside package share directory (got: '{file}')"
+            )
+
+        return str(resolved_file)
 
     if file.startswith('file://'):
         resolved_file = os.path.expanduser(file[len('file://') :])

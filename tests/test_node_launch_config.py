@@ -198,6 +198,12 @@ def test_invalid_used_entries_raise_value_error():
         _resolve(node_remappings={'front_odometry': ['/a:=']})
 
 
+@pytest.mark.parametrize('respawn_delay', [-0.1, float('nan'), float('inf')])
+def test_node_options_rejects_invalid_respawn_delay(respawn_delay):
+    with pytest.raises(ValueError, match='finite number greater than or equal to 0'):
+        _resolve(node_options={'front_odometry': {'respawn_delay': respawn_delay}})
+
+
 def test_invalid_json_raises_value_error():
     with pytest.raises(ValueError, match='valid JSON'):
         rlh.resolve_node_launch_configs(['front_odometry'], '{', '{}', '{}')

@@ -40,6 +40,43 @@ def test_process_params_file_renders_substitutions_and_updates_launch_context(tm
     )
 
 
+def test_process_params_file_uses_unique_rendered_paths_for_same_namespace(tmp_path):
+    source_path = tmp_path.joinpath('source.yaml')
+
+    source_path.write_text(
+        '/**/node:\n  ros__parameters:\n    frame_id: $(var robot_prefix)base_link\n', encoding='utf-8'
+    )
+
+    first_ctx = LaunchContext()
+    first_ctx.launch_configurations['params_file'] = str(source_path)
+    first_ctx.launch_configurations['params_file_allow_substs'] = 'True'
+    first_ctx.launch_configurations['robot_namespace'] = '/robot_1'
+    first_ctx.launch_configurations['robot_prefix'] = 'first_'
+
+    second_ctx = LaunchContext()
+    second_ctx.launch_configurations['params_file'] = str(source_path)
+    second_ctx.launch_configurations['params_file_allow_substs'] = 'True'
+    second_ctx.launch_configurations['robot_namespace'] = '/robot_1'
+    second_ctx.launch_configurations['robot_prefix'] = 'second_'
+
+    first_action = rlh.process_params_file(first_ctx)[0]
+    second_action = rlh.process_params_file(second_ctx)[0]
+
+    first_action.execute(first_ctx)
+    second_action.execute(second_ctx)
+
+    first_rendered_path = Path(first_ctx.launch_configurations['params_file'])
+    second_rendered_path = Path(second_ctx.launch_configurations['params_file'])
+
+    assert first_rendered_path != second_rendered_path
+    assert first_rendered_path.read_text(encoding='utf-8') == (
+        '/**/node:\n  ros__parameters:\n    frame_id: first_base_link\n'
+    )
+    assert second_rendered_path.read_text(encoding='utf-8') == (
+        '/**/node:\n  ros__parameters:\n    frame_id: second_base_link\n'
+    )
+
+
 def test_process_params_file_resolves_without_rendering_when_substitutions_are_disabled(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
 
