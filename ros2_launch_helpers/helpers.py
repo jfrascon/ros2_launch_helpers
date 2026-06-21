@@ -25,6 +25,15 @@ LOGGING_OPTIONS_DESC = (
     'and custom logger levels.'
 )
 
+# `emulate_tty` makes the process see stdout and stderr as a terminal instead of a plain pipe.
+# This does not change ROS behavior. It only affects console details such as colors, buffering,
+# and log formatting. It is useful when a human reads the output on screen, and usually not useful
+# when launch writes the output only to log files.
+#
+# Practical rule:
+# - output='screen' -> emulate_tty=True can be useful.
+# - output='both'   -> emulate_tty=True can be useful.
+# - output='log'    -> emulate_tty=False is normally the better default.
 DEFAULT_NODE_OPTIONS = {
     'output': 'screen',  # One of: 'screen', 'log', 'both'
     'emulate_tty': True,  # Whether to emulate a TTY for the node's stdout/stderr
