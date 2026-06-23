@@ -44,21 +44,25 @@ Pass `**kwargs` to the base `Action` class so standard launch features such as `
 
 Use imperative class names for actions, such as `SetRobotNamespace` or `ProcessParamsFile`.
 
-## Launch action options
+## Launch action arguments
 
-Use `launch_action_options_json_str` for optional JSON-configurable fields from `Node`, `ExecuteProcess`, and `ExecuteLocal`.
+Use an action-specific JSON launch argument, such as `bridge_arguments_json_str`, for optional fields from one `Node`, `ExecuteProcess`, or `ExecuteLocal` action.
 
 The helper should be strict. It should reject unknown fields, reject fields that belong explicitly in the launch file, and validate the JSON type for every supported field.
+
+The JSON object should contain arguments for one action directly. Do not add lookup keys such as `bridge` or `speed_controller` inside that JSON object.
 
 Do not make this helper a second launch language. Fields such as `package`, `executable`, `namespace`, `parameters`, and `cmd` should stay visible in Python launch code.
 
 If a supported ROS 2 field is `Optional[...]`, JSON `null` should be accepted and returned as Python `None`. If a supported ROS 2 field is not optional, JSON `null` should be rejected.
 
-When the supported field list changes, update all three places together:
+When the launch action arguments helper changes, update all four places together:
 
 - `ros2_launch_helpers/helpers.py`
-- `tests/test_launch_action_options.py`
-- `doc/launch_action_options_design.md`
+- `tests/test_launch_action_arguments.py`
+- `doc/launch_action_arguments_design.md`
+- `README.md`
+
 
 ## Public API
 
@@ -85,7 +89,7 @@ Use sentence-case headings, for example `## What the helper does and does not do
 
 Keep README examples small and runnable in spirit. If an example uses a launch context, show where that context comes from, usually an `OpaqueFunction` callback.
 
-Use the README for the short usage path. Use `doc/launch_action_options_design.md` for longer design reasoning and detailed field references.
+Use the README for the short usage path. Use `doc/launch_action_arguments_design.md` for longer design reasoning and detailed field references.
 
 ## Tests
 
@@ -95,4 +99,4 @@ Test launch-context integration on actions.
 
 Every action should have tests that prove which launch configuration keys it reads and writes.
 
-For `launch_action_options_json_str`, test valid values, invalid field names, rejected fields, invalid JSON types, `null` handling for optional fields, and rejection of `null` for non-optional fields.
+For launch action arguments, test valid values, invalid field names, rejected fields, invalid JSON types, `null` handling for optional fields, and rejection of `null` for non-optional fields.

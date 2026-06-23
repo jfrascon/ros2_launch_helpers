@@ -1,4 +1,4 @@
-# Launch action options technical design
+# Launch action arguments technical design
 
 ## Problem and goal
 
@@ -75,37 +75,31 @@ class ExecuteLocal(Action):
 
 The important consequence is simple: when a launch file creates a `Node`, the launch file author is not only choosing values for the `Node` constructor. The author is also deciding which fields from `ExecuteProcess` and `ExecuteLocal` can be configured by the user of that launch file.
 
-The direct ROS 2 launch solution is to expose configurable values with `DeclareLaunchArgument`. That is a good solution when the launch file only needs a few clear inputs. It becomes harder to use when a launch file starts several actions and each action may need several optional fields. If a launch file starts one node, exposing every possible `Node`, `ExecuteProcess`, and `ExecuteLocal` field would already create many launch arguments. If a launch file starts three nodes, those launch arguments have to be repeated for each node or replaced with custom parsing code. Both options make the launch file harder to read. They also make it harder for the application user to know which values can be overridden.
+The direct ROS 2 launch solution is to expose configurable values with `DeclareLaunchArgument`. That is a good solution when the launch file only needs a few clear inputs. It becomes harder to use when a launch file starts several actions and each action may need several optional fields. If a launch file starts one node, exposing every possible `Node`, `ExecuteProcess`, and `ExecuteLocal` field would already create many launch arguments. If a launch file starts three nodes, those launch arguments have to be repeated for each node or replaced with custom parsing code. Both choices make the launch file harder to read. They also make it harder for the application user to know which values can be overridden.
 
-A helper API should not expose only a few selected fields and then need a new helper option every time another valid launch field becomes useful. That kind of API is easy to start with, but it becomes difficult to grow in a consistent way. For example, a user may later need a valid but less common field such as `prefix`, `cwd`, `additional_env`, `arguments`, or `cached_output`. The package should not need a new dedicated setting for each one of those fields.
+A helper API should not expose only a few selected fields and then need a new helper argument every time another valid launch field becomes useful. That kind of API is easy to start with, but it becomes difficult to grow in a consistent way. For example, a user may later need a valid but less common field such as `prefix`, `cwd`, `additional_env`, `arguments`, or `cached_output`. The package should not need a new dedicated setting for each one of those fields.
 
-The goal of `launch_action_options_json_str` is to provide one structured launch argument for these optional fields. The launch argument value is a JSON string. The helper reads that JSON string, checks that the field names and value types are supported, and returns normal Python dictionaries. The launch file can then pass one of those dictionaries to `Node`, `ExecuteProcess`, or `ExecuteLocal` with Python `**kwargs` syntax.
+The goal of this helper is to support one structured launch argument for the optional fields of one action. The launch argument value is a JSON string. The helper reads that JSON string, checks that the field names and value types are supported, and returns one normal Python dictionary. The launch file can then pass that dictionary to `Node`, `ExecuteProcess`, or `ExecuteLocal` with Python `**kwargs` syntax.
 
 The JSON value is not meant to replace the Python launch file. The launch file still writes the fields that decide what is being launched. Examples are `Node.package`, `Node.executable`, `Node.namespace`, `Node.parameters`, and `ExecuteProcess.cmd`. Those fields are important because they show the reader which package, executable, namespace, parameters, or command the launch file uses. They should stay visible in the Python launch code. The JSON object is only for optional fields that adjust an action that the launch file has already chosen.
 
-Use one JSON object indexed by a stable key chosen by the launch file. This key is only used to look up the options for one action. It does not have to be the final ROS node name. It also does not have to be the final process name. It may have the same value as the final name, but that is only a choice made by the launch file. This distinction is important because `name` can itself be one of the options configured inside the JSON value. If `name` is configurable, it should not also be the only way to find the object that contains the options.
+Each configurable action should receive its own launch argument. For example, a launch file can expose `bridge_arguments_json_str` for a bridge node and `speed_controller_arguments_json_str` for a controller node. Each JSON string contains the arguments for that one action directly. There is no extra lookup key inside the JSON object.
 
 ```json
 {
-  "speed_controller": {
-    "name": "spd_controller",
-    "output": "screen",
-    "emulate_tty": true,
-    "respawn": true,
-    "remappings": [
-      ["battery_state", "state/battery"],
-      ["cmd_vel", "commands/velocity"]
-    ]
-  },
-  "bridge": {
-    "name": "robot_bridge",
-    "output": "log",
-    "respawn": false
-  }
+  "name": "robot_bridge",
+  "output": "screen",
+  "emulate_tty": true,
+  "respawn": true,
+  "remappings": [
+    ["battery_state", "state/battery"],
+    ["cmd_vel", "commands/velocity"]
+  ]
 }
 ```
 
-In this example, `speed_controller` and `bridge` are lookup keys inside one `launch_action_options_json_str` value. The `speed_controller` object configures remappings because that node may need them. The `bridge` object does not configure remappings. The lookup key and the `name` field are still two separate things. The launch file could use `speed_controller` as the lookup key and still choose a different value for the `name` field.
+In this example, the JSON object can be used as the value of `bridge_arguments_json_str`. The launch file decides that this launch argument belongs to the bridge action. The JSON does not need to repeat that decision with another key named `bridge`.
+
 
 ## Design approach
 
@@ -115,59 +109,47 @@ One possible design is to create one `DeclareLaunchArgument` for every optional 
 
 Another possible design is to accept any JSON object and pass it directly to the action without checking it. That would be flexible, but it would make mistakes harder to find. A typo such as `"emulate_ttyy"` would not be detected by the helper. The error would appear later, usually inside ROS 2 launch, and the message would be less connected to the original JSON input.
 
-The chosen design is strict, but only inside a clear boundary. The helper supports a known list of fields from `Node`, `ExecuteProcess`, and `ExecuteLocal`. Each supported field has a documented JSON shape. Unknown fields fail early. Fields that should stay in the launch file also fail early. The helper does not check whether a supported field belongs to the exact action that will receive it. For example, the helper can parse `remappings`, but `remappings` only makes sense for `Node`. If the launch file passes those options to `ExecuteProcess`, `ExecuteProcess` will reject them. That is the same kind of error the user would get when writing the same fields directly in Python.
+The chosen design is strict, but only inside a clear boundary. The helper supports a known list of fields from `Node`, `ExecuteProcess`, and `ExecuteLocal`. Each supported field has a documented JSON shape. Unknown fields fail early. Fields that should stay in the launch file also fail early. The helper does not check whether a supported field belongs to the exact action that will receive it. For example, the helper can parse `remappings`, but `remappings` only makes sense for `Node`. If the launch file passes those arguments to `ExecuteProcess`, `ExecuteProcess` will reject them. That is the same kind of error the user would get when writing the same fields directly in Python.
 
 ## Public API
 
 The default launch argument value is:
 
 ```python
-default_launch_action_options_json_str() -> str
+default_launch_action_arguments_json_str() -> str
 ```
 
-It returns `"{}"`. That means the launch file receives an empty JSON object when the user does not override any action options.
+It returns `"{}"`. That means the launch file receives an empty JSON object when the user does not override any action arguments.
 
 The launch argument description is:
 
 ```python
-LAUNCH_ACTION_OPTIONS_DESC
+LAUNCH_ACTION_ARGUMENTS_DESC
 ```
 
-Use it as the `description` value when declaring `launch_action_options_json_str`.
+Use it as the `description` value when declaring an action-specific argument such as `bridge_arguments_json_str`.
 
 The parser helper name is:
 
 ```python
-resolve_launch_action_options(options_json_str: str | None) -> dict[str, dict[str, Any]]
+resolve_launch_action_arguments(
+    str_json_arguments: str | None,
+    default_arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]
 ```
 
-The second helper retrieves the options for one key. It can also receive default values from the launch file. When both the defaults and the JSON object define the same field, the JSON value wins.
+The helper parses arguments for one action. It can also receive default values from the launch file. When both `default_arguments` and the JSON object define the same field, the JSON value wins.
 
 ```text
-per-action defaults < JSON object
-```
-
-The helper name is:
-
-```python
-get_launch_action_options(
-    launch_action_options: dict[str, dict[str, Any]],
-    key: str,
-    defaults: dict[str, Any] | None = None,
-) -> dict[str, Any]
+default_arguments < JSON object
 ```
 
 Example usage:
 
 ```python
-launch_action_options = rlh.resolve_launch_action_options(
-    LaunchConfiguration('launch_action_options_json_str').perform(context)
-)
-
-bridge_options = rlh.get_launch_action_options(
-    launch_action_options,
-    'bridge',
-    defaults={
+bridge_arguments = rlh.resolve_launch_action_arguments(
+    LaunchConfiguration('bridge_arguments_json_str').perform(context),
+    default_arguments={
         'name': 'bridge',
         'output': 'screen',
         'emulate_tty': True,
@@ -179,13 +161,14 @@ Node(
     executable='bridge_node',
     namespace=LaunchConfiguration('robot_namespace'),
     parameters=parameters,
-    **bridge_options,
+    **bridge_arguments,
 )
 ```
 
+
 ## What the helper does and does not do
 
-The helper only reads JSON and returns option dictionaries. The launch file decides where each dictionary is used:
+The helper only reads JSON and returns one argument dictionary. The launch file decides where that dictionary is used:
 
 - `Node(..., **kwargs)`
 - `ExecuteProcess(..., **kwargs)`
@@ -209,8 +192,8 @@ JSON is the preferred inline format for this `DeclareLaunchArgument` value. It i
 
 A file-based companion can be added later for long configurations:
 
-- `launch_action_options_json_str`: JSON inline, useful for CLI overrides.
-- `launch_action_options_file`: YAML or JSON file, useful for project configuration.
+- `bridge_arguments_json_str`: JSON inline, useful for CLI overrides.
+- `bridge_arguments_file`: YAML or JSON file, useful for project configuration.
 
 ## Source type references
 
@@ -257,11 +240,11 @@ For each `SomeSubstitutionsType` field, the documentation shows the same value i
 
 ## Type and conversion rules
 
-Most JSON values are passed through directly as action options.
+Most JSON values are passed through directly as action arguments.
 
 For fields typed as `bool`, `float`, or `int`, the JSON value must use the matching JSON type directly. For example, a boolean must be written as `true` or `false`, not as `"true"` or `"false"`. A number must be written as `2.0`, not as `"2.0"`. The helper does not convert those strings into booleans or numbers. This keeps the behavior close to writing the same fields directly in Python.
 
-For fields typed as `Optional[...]`, the JSON value may be `null`. A missing field and a field explicitly set to `null` are not written the same way, but both are valid. A missing field means the returned options dictionary does not contain that field. A field set to `null` means the returned options dictionary contains that field with Python `None` as its value.
+For fields typed as `Optional[...]`, the JSON value may be `null`. A missing field and a field explicitly set to `null` are not written the same way, but both are valid. A missing field means the returned argument dictionary does not contain that field. A field set to `null` means the returned argument dictionary contains that field with Python `None` as its value.
 
 There is one JSON-to-Python conversion:
 
@@ -282,7 +265,7 @@ Unknown fields fail with a clear error. This is stricter than passing everything
 
 ## Unsupported values
 
-The launch action options object is not a second launch language. It only represents values that can be written in JSON. It does not try to represent any possible Python object, for example:
+The launch action arguments object is not a second launch language. It only represents values that can be written in JSON. It does not try to represent any possible Python object, for example:
 
 - `LaunchConfiguration`
 - `PathJoinSubstitution`
@@ -292,13 +275,13 @@ The launch action options object is not a second launch language. It only repres
 - `OpaqueFunction`
 - callables
 
-If a launch file needs those objects, it should create them in Python. The launch file can then combine those Python objects with the parsed options before creating the action.
+If a launch file needs those objects, it should create them in Python. The launch file can then combine those Python objects with the parsed arguments before creating the action.
 
 ## Name and exec name semantics
 
 `name` does not mean the same thing for every action.
 
-When options are passed to `Node`, `name` means the ROS node name:
+When arguments are passed to `Node`, `name` means the ROS node name:
 
 ```python
 Node(
@@ -308,7 +291,7 @@ Node(
 )
 ```
 
-When options are passed to `Node`, `exec_name` means the launch process label. This is the name that launch uses for the process that is running the node. Internally, `Node` forwards `exec_name` as `ExecuteProcess.name`:
+When arguments are passed to `Node`, `exec_name` means the launch process label. This is the name that launch uses for the process that is running the node. Internally, `Node` forwards `exec_name` as `ExecuteProcess.name`:
 
 ```python
 Node(
@@ -318,7 +301,7 @@ Node(
 )
 ```
 
-When options are passed directly to `ExecuteProcess`, `name` means the launch process label. `ExecuteProcess` does not accept `exec_name`:
+When arguments are passed directly to `ExecuteProcess`, `name` means the launch process label. `ExecuteProcess` does not accept `exec_name`:
 
 ```python
 ExecuteProcess(
@@ -342,7 +325,7 @@ Each supported field should have at least one JSON example. Fields backed by `So
 
 ## JSON examples for supported fields
 
-The examples in this section show the JSON content before shell quoting. When the value is passed on the command line, the whole JSON object is written as the value of `launch_action_options_json_str`.
+The examples in this section show the JSON content before shell quoting. When the value is passed on the command line, the whole JSON object is written as the value of an action-specific launch argument such as `bridge_arguments_json_str`.
 
 ### Node fields
 
@@ -350,16 +333,14 @@ This example shows every supported field that comes from `launch_ros.actions.Nod
 
 ```json
 {
-  "speed_controller": {
-    "name": "spd_controller",
-    "exec_name": "spd_controller_process",
-    "remappings": [
-      ["battery_state", "state/battery"],
-      ["cmd_vel", "commands/velocity"]
-    ],
-    "ros_arguments": ["--log-level", "debug"],
-    "arguments": ["--controller-mode", "speed"]
-  }
+  "name": "spd_controller",
+  "exec_name": "spd_controller_process",
+  "remappings": [
+    ["battery_state", "state/battery"],
+    ["cmd_vel", "commands/velocity"]
+  ],
+  "ros_arguments": ["--log-level", "debug"],
+  "arguments": ["--controller-mode", "speed"]
 }
 ```
 
@@ -367,10 +348,8 @@ For fields typed as `SomeSubstitutionsType`, the string form is preferred. The a
 
 ```json
 {
-  "speed_controller": {
-    "name": ["spd", "_controller"],
-    "exec_name": ["spd", "_controller", "_process"]
-  }
+  "name": ["spd", "_controller"],
+  "exec_name": ["spd", "_controller", "_process"]
 }
 ```
 
@@ -380,16 +359,14 @@ This example shows every supported field that comes from `launch.actions.Execute
 
 ```json
 {
-  "gazebo": {
-    "name": "gazebo_process",
-    "prefix": "gdb -ex run --args",
-    "cwd": "/tmp",
-    "env": {
-      "GAZEBO_RESOURCE_PATH": "/opt/my_robot/worlds"
-    },
-    "additional_env": {
-      "RCUTILS_COLORIZED_OUTPUT": "1"
-    }
+  "name": "gazebo_process",
+  "prefix": "gdb -ex run --args",
+  "cwd": "/tmp",
+  "env": {
+    "GAZEBO_RESOURCE_PATH": "/opt/my_robot/worlds"
+  },
+  "additional_env": {
+    "RCUTILS_COLORIZED_OUTPUT": "1"
   }
 }
 ```
@@ -398,11 +375,9 @@ The `name`, `prefix`, and `cwd` fields are typed as `SomeSubstitutionsType`, so 
 
 ```json
 {
-  "gazebo": {
-    "name": ["gazebo", "_process"],
-    "prefix": ["gdb", " -ex run --args"],
-    "cwd": ["/", "tmp"]
-  }
+  "name": ["gazebo", "_process"],
+  "prefix": ["gdb", " -ex run --args"],
+  "cwd": ["/", "tmp"]
 }
 ```
 
@@ -412,19 +387,17 @@ This example shows every supported field that comes from `launch.actions.Execute
 
 ```json
 {
-  "speed_controller": {
-    "shell": false,
-    "sigterm_timeout": "2.5",
-    "sigkill_timeout": "10",
-    "emulate_tty": true,
-    "output": "screen",
-    "output_format": "[{this.process_description.final_name}] {line}",
-    "cached_output": false,
-    "log_cmd": true,
-    "respawn": true,
-    "respawn_delay": 2.0,
-    "respawn_max_retries": 3
-  }
+  "shell": false,
+  "sigterm_timeout": "2.5",
+  "sigkill_timeout": "10",
+  "emulate_tty": true,
+  "output": "screen",
+  "output_format": "[{this.process_description.final_name}] {line}",
+  "cached_output": false,
+  "log_cmd": true,
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "respawn_max_retries": 3
 }
 ```
 
@@ -432,11 +405,9 @@ The `sigterm_timeout`, `sigkill_timeout`, and `output` fields are typed as `Some
 
 ```json
 {
-  "speed_controller": {
-    "sigterm_timeout": ["2", ".", "5"],
-    "sigkill_timeout": ["1", "0"],
-    "output": ["scr", "een"]
-  }
+  "sigterm_timeout": ["2", ".", "5"],
+  "sigkill_timeout": ["1", "0"],
+  "output": ["scr", "een"]
 }
 ```
 
@@ -446,16 +417,15 @@ Optional fields can also be set to `null`. This is useful when the user wants to
 
 ```json
 {
-  "speed_controller": {
-    "name": null,
-    "remappings": null,
-    "ros_arguments": null,
-    "prefix": null,
-    "env": null,
-    "respawn_delay": null
-  }
+  "name": null,
+  "remappings": null,
+  "ros_arguments": null,
+  "prefix": null,
+  "env": null,
+  "respawn_delay": null
 }
 ```
+
 
 ## Supported fields reference
 
@@ -469,7 +439,7 @@ Optional fields can also be set to `null`. This is useful when the user wants to
   - Meaning for `Node`: launch process label forwarded as `ExecuteProcess.name`.
 - `remappings: Optional[SomeRemapRules] = None`
   - JSON: list of two-item lists, for example `[["from", "to"]]`, or null.
-  - The helper converts each two-item list to a tuple before forwarding the options.
+  - The helper converts each two-item list to a tuple before forwarding the arguments.
 - `ros_arguments: Optional[Iterable[SomeSubstitutionsType]] = None`
   - JSON: `list[string]` or null.
 - `arguments: Optional[Iterable[SomeSubstitutionsType]] = None`
@@ -548,4 +518,4 @@ Rejected from `launch.actions.ExecuteLocal`:
 
 ## Future extensions
 
-- A file-based companion such as `launch_action_options_file` can be added later for long project-level configurations.
+- A file-based companion such as `bridge_arguments_file` can be added later for long project-level configurations.

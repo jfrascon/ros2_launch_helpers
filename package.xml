@@ -4,7 +4,7 @@
   <name>ros2_launch_helpers</name>
   <version>1.0.0</version>
   <description>
-    Helpers to standardize ROS 2 launch configuration: parameter overlays, launch action options, and CLI overrides.
+    Helpers to standardize ROS 2 launch configuration: parameter overlays, launch action arguments, and CLI overrides.
   </description>
   <maintainer email="jfracon@gmail.com">Juan Francisco Rascon Crespo</maintainer>
   <license>Apache-2.0</license>

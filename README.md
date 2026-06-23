@@ -6,11 +6,11 @@
 
 This package helps launch files do a few common tasks:
 
-- Declare compact launch arguments for action options, parameter files, overlays, and namespaces.
+- Declare compact launch arguments for action arguments, parameter files, overlays, and namespaces.
 - Use explicit launch actions to update common launch context values.
 - Compute robot namespaces, robot prefixes, and rendered parameter file paths.
 - Build parameter layers from a base file and additional overlays.
-- Parse launch action options from JSON strings.
+- Parse launch action arguments from JSON strings.
 - Convert JSON remapping pairs into the tuple form expected by `launch_ros.actions.Node`.
 
 ## Launch actions
@@ -61,17 +61,17 @@ robot_namespace = rlh.compute_robot_namespace('/robots', 'front')
 robot_prefix = rlh.compute_robot_prefix('front')
 ```
 
-## Launch action options
+## Launch action arguments
 
-Use `launch_action_options_json_str` when a launch file should let the application configure optional fields of `Node`, `ExecuteProcess`, or `ExecuteLocal`.
+Use `bridge_arguments_json_str`, `speed_controller_arguments_json_str`, or a similar launch argument when a launch file should let the application configure optional fields of one `Node`, `ExecuteProcess`, or `ExecuteLocal` action.
 
 Without this helper, the launch file would need one launch argument for every optional field. That becomes hard to read when a launch file starts several nodes or processes.
 
-With this helper, the launch file receives one JSON string. The JSON string contains one object per action. Each object is stored under a stable key chosen by the launch file.
+With this helper, each configurable action receives its own JSON string. The JSON object contains the arguments for that action directly. There is no extra key such as `"bridge"` inside the JSON.
 
-Some fields should still stay in the Python launch file. For example, the launch file should normally keep `package`, `executable`, `namespace`, `parameters`, and `cmd` visible in Python code. For the longer explanation, see [Launch Action Options Technical Design](doc/launch_action_options_design.md).
+Some fields should still stay in the Python launch file. For example, the launch file should normally keep `package`, `executable`, `namespace`, `parameters`, and `cmd` visible in Python code. For the longer explanation, see [Launch action arguments technical design](doc/launch_action_arguments_design.md).
 
-Resolve the JSON string inside code that has a `LaunchContext`. A common pattern is to do it inside an `OpaqueFunction` callback. The callback reads the JSON string, gets the options for one action key, and passes those options to the action with `**bridge_options`.
+Resolve the JSON string inside code that has a `LaunchContext`. A common pattern is to do it inside an `OpaqueFunction` callback. The callback reads the JSON string and passes the returned arguments to the action with `**bridge_arguments`.
 
 ```python
 import ros2_launch_helpers as rlh
@@ -82,14 +82,9 @@ from launch_ros.actions import Node
 
 
 def launch_setup(ctx):
-    launch_action_options = rlh.resolve_launch_action_options(
-        LaunchConfiguration('launch_action_options_json_str').perform(ctx)
-    )
-
-    bridge_options = rlh.get_launch_action_options(
-        launch_action_options,
-        'bridge',
-        defaults={
+    bridge_arguments = rlh.resolve_launch_action_arguments(
+        LaunchConfiguration('bridge_arguments_json_str').perform(ctx),
+        default_arguments={
             'name': 'bridge',
             'output': 'screen',
             'emulate_tty': True,
@@ -101,7 +96,7 @@ def launch_setup(ctx):
             package='ros_gz_bridge',
             executable='bridge_node',
             namespace=LaunchConfiguration('robot_namespace'),
-            **bridge_options,
+            **bridge_arguments,
         )
     ]
 
@@ -110,51 +105,43 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('robot_namespace', default_value=''),
         DeclareLaunchArgument(
-            'launch_action_options_json_str',
-            default_value=rlh.default_launch_action_options_json_str(),
-            description=rlh.LAUNCH_ACTION_OPTIONS_DESC,
+            'bridge_arguments_json_str',
+            default_value=rlh.default_launch_action_arguments_json_str(),
+            description=rlh.LAUNCH_ACTION_ARGUMENTS_DESC,
         ),
         OpaqueFunction(function=launch_setup),
     ])
 ```
 
-The helper applies no global defaults. Each launch file supplies defaults for the action it is creating. If the JSON object defines the same field, the JSON value wins.
+The helper applies no global `default_arguments`. Each launch file supplies `default_arguments` for the action it is creating. If the JSON object defines the same field, the JSON value wins.
 
 ## JSON format
 
-The default launch argument value is `"{}"`, which means "there are no overrides for any action".
+The default launch argument value is `"{}"`, which means "there are no overrides for this action".
 
 Example CLI override:
 
 ```bash
 ros2 launch my_robot bringup.launch.py \
-  launch_action_options_json_str:='{"bridge":{"output":"screen","respawn":true,"respawn_delay":2.0}}'
+  bridge_arguments_json_str:='{"output":"screen","respawn":true,"respawn_delay":2.0}'
 ```
 
-Example `launch_action_options_json_str` value. This is one JSON string with two objects inside it:
+Example `bridge_arguments_json_str` value:
 
 ```json
 {
-  "speed_controller": {
-    "name": "spd_controller",
-    "output": "screen",
-    "emulate_tty": true,
-    "respawn": true,
-    "respawn_delay": 2.0,
-    "ros_arguments": ["--log-level", "debug"],
-    "remappings": [
-      ["battery_state", "state/battery"],
-      ["cmd_vel", "commands/velocity"]
-    ],
-    "additional_env": {
-      "RCUTILS_COLORIZED_OUTPUT": "1"
-    }
-  },
-  "bridge": {
-    "name": "robot_bridge",
-    "output": "log",
-    "respawn": false,
-    "respawn_delay": null
+  "name": "robot_bridge",
+  "output": "screen",
+  "emulate_tty": true,
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": ["--log-level", "debug"],
+  "remappings": [
+    ["battery_state", "state/battery"],
+    ["cmd_vel", "commands/velocity"]
+  ],
+  "additional_env": {
+    "RCUTILS_COLORIZED_OUTPUT": "1"
   }
 }
 ```
@@ -204,7 +191,7 @@ The helper rejects fields that should stay explicit in the launch file:
 - `on_exit`
 - `condition`
 
-See [doc/launch_action_options_design.md](doc/launch_action_options_design.md) for the full design notes. That document also lists the ROS 2 source files used to define this supported field list.
+See [doc/launch_action_arguments_design.md](doc/launch_action_arguments_design.md) for the full design notes. That document also lists the ROS 2 source files used to define this supported field list.
 
 ## SomeSubstitutionsType values
 
@@ -214,9 +201,7 @@ Preferred:
 
 ```json
 {
-  "bridge": {
-    "sigterm_timeout": "2.5"
-  }
+  "sigterm_timeout": "2.5"
 }
 ```
 
@@ -224,9 +209,7 @@ Accepted:
 
 ```json
 {
-  "bridge": {
-    "sigterm_timeout": ["2", ".", "5"]
-  }
+  "sigterm_timeout": ["2", ".", "5"]
 }
 ```
 
@@ -236,12 +219,12 @@ Accepted:
 
 The `name` field has the same meaning it would have if written directly in Python launch code.
 
-When options are passed to `Node`, `name` is the ROS node name and `exec_name` is the launch process label forwarded to `ExecuteProcess.name`.
+When arguments are passed to `Node`, `name` is the ROS node name and `exec_name` is the launch process label forwarded to `ExecuteProcess.name`.
 
-When options are passed directly to `ExecuteProcess`, `name` is the launch process label and `exec_name` is not accepted.
+When arguments are passed directly to `ExecuteProcess`, `name` is the launch process label and `exec_name` is not accepted.
 
 ## When to use
 
-- When a launch file should accept optional launch action options without declaring one launch argument per option.
-- When parent launch files should be able to pass process options or remappings to included launch files.
-- When a launch file creates one or more actions and needs processed options in the shape expected by ROS 2 launch.
+- When a launch file should accept optional launch action arguments without declaring one launch argument per action argument.
+- When parent launch files should be able to pass process arguments or remappings to included launch files.
+- When a launch file creates one or more actions and needs processed arguments in the shape expected by ROS 2 launch.
