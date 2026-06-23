@@ -32,3 +32,8 @@ def test_package_xml_uses_ament_python_buildtool():
 
     assert build_type == 'ament_python'
     assert buildtool_depends == ['ament_python']
+
+
+def test_common_validation_helpers_are_exported():
+    assert rlh.is_valid_name('robot_1')
+    assert rlh.is_valid_namespace('/robots/robot_1')

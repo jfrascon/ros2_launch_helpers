@@ -27,8 +27,7 @@ def test_set_global_namespace_action_accepts_launch_configuration_input():
     ctx.launch_configurations['namespace'] = 'robots/front'
 
     result = rlh.SetGlobalNamespace(
-        namespace=LaunchConfiguration('namespace'),
-        output_namespace_key='global_namespace',
+        namespace=LaunchConfiguration('namespace'), output_namespace_key='global_namespace'
     ).execute(ctx)
 
     assert result is None
@@ -75,10 +74,9 @@ def test_set_robot_prefix_action_accepts_launch_configuration_input():
     ctx = LaunchContext()
     ctx.launch_configurations['robot_name'] = 'front'
 
-    result = rlh.SetRobotPrefix(
-        robot_name=LaunchConfiguration('robot_name'),
-        robot_prefix_key='target_prefix',
-    ).execute(ctx)
+    result = rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), robot_prefix_key='target_prefix').execute(
+        ctx
+    )
 
     assert result is None
     assert ctx.launch_configurations['target_prefix'] == 'front_'

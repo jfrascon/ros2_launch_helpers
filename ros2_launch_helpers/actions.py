@@ -73,10 +73,7 @@ class SetGlobalNamespace(Action):
     """
 
     def __init__(
-        self,
-        namespace: str | LaunchConfiguration = 'namespace',
-        output_namespace_key: str = 'namespace',
-        **kwargs,
+        self, namespace: str | LaunchConfiguration = 'namespace', output_namespace_key: str = 'namespace', **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.namespace = _as_launch_configuration(namespace)
@@ -117,10 +114,7 @@ class SetRobotPrefix(Action):
     """
 
     def __init__(
-        self,
-        robot_name: str | LaunchConfiguration = 'robot_name',
-        robot_prefix_key: str = 'robot_prefix',
-        **kwargs,
+        self, robot_name: str | LaunchConfiguration = 'robot_name', robot_prefix_key: str = 'robot_prefix', **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self.robot_name = _as_launch_configuration(robot_name)

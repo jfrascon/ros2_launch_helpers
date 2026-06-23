@@ -1,46 +1,53 @@
 # ros2_launch_helpers
 
-`ros2_launch_helpers` standardizes common ROS 2 launch-file configuration.
+`ros2_launch_helpers` provides small helpers for Python ROS 2 launch files.
 
 ## Purpose
 
-This package provides functions and utilities to:
+This package helps launch files do a few common tasks:
 
-- Declare standard launch arguments for parameter files, overlays, namespaces, node options, node remappings, and node logging options.
-- Use explicit launch actions for common context updates such as robot namespaces, robot prefixes, and rendered parameter files.
+- Declare compact launch arguments for action options, parameter files, overlays, and namespaces.
+- Use explicit launch actions to update common launch context values.
+- Compute robot namespaces, robot prefixes, and rendered parameter file paths.
 - Build parameter layers from a base file and additional overlays.
-- Parse node options, node remappings, and node logging options from JSON strings.
-- Convert the parsed values into the structures expected by `launch_ros.actions.Node`.
+- Parse launch action options from JSON strings.
+- Convert JSON remapping pairs into the tuple form expected by `launch_ros.actions.Node`.
 
-## Launch Actions
+## Launch actions
 
-Use actions when a launch file needs to read values from the launch context and write derived values back into the launch context. The actions are thin wrappers around helper functions, so the naming and rendering rules remain testable without running a full launch description.
+Use actions when a launch file needs to read a value from the launch context, compute a new value, and write that new value back into the launch context. The action owns the launch-context part. A helper function owns the simple computation. This keeps the computation easy to test without running a full launch description.
+
+The actions are normal ROS 2 launch actions. Put them in the `LaunchDescription`. If the launch file first needs to read the current launch context, create or return them from an `OpaqueFunction` callback.
 
 ```python
 import ros2_launch_helpers as rlh
+from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 
-DeclareLaunchArgument('namespace', default_value='')
-DeclareLaunchArgument('robot_name', default_value='robot_1')
-DeclareLaunchArgument('params_file')
-DeclareLaunchArgument('params_file_allow_substs', default_value='true')
 
-rlh.SetGlobalNamespace(namespace=LaunchConfiguration('namespace'), output_namespace_key='namespace')
-rlh.SetRobotNamespace(
-    namespace=LaunchConfiguration('namespace'),
-    robot_name=LaunchConfiguration('robot_name'),
-    robot_namespace_key='robot_namespace',
-)
-rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), robot_prefix_key='robot_prefix')
-rlh.ProcessParamsFile(
-    params_file=LaunchConfiguration('params_file'),
-    allow_substs=LaunchConfiguration('params_file_allow_substs'),
-    output_params_file_key='params_file',
-)
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('namespace', default_value=''),
+        DeclareLaunchArgument('robot_name', default_value='robot_1'),
+        DeclareLaunchArgument('params_file'),
+        DeclareLaunchArgument('params_file_allow_substs', default_value='true'),
+        rlh.SetGlobalNamespace(namespace=LaunchConfiguration('namespace'), output_namespace_key='namespace'),
+        rlh.SetRobotNamespace(
+            namespace=LaunchConfiguration('namespace'),
+            robot_name=LaunchConfiguration('robot_name'),
+            robot_namespace_key='robot_namespace',
+        ),
+        rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), robot_prefix_key='robot_prefix'),
+        rlh.ProcessParamsFile(
+            params_file=LaunchConfiguration('params_file'),
+            allow_substs=LaunchConfiguration('params_file_allow_substs'),
+            output_params_file_key='params_file',
+        ),
+    ])
 ```
 
-Action inputs that read launch context values accept either a launch configuration name string or a `LaunchConfiguration` object. Passing `LaunchConfiguration(...)` makes the runtime lookup explicit.
+Action inputs that read launch context values accept two forms. They can receive a launch configuration name string, such as `'robot_name'`. They can also receive a `LaunchConfiguration` object, such as `LaunchConfiguration('robot_name')`. Passing `LaunchConfiguration(...)` makes the runtime lookup explicit at the call site.
 
 - `SetGlobalNamespace()` reads `namespace` and writes the absolute namespace back to `namespace`.
 - `SetRobotNamespace()` reads `namespace` and `robot_name`, then writes `robot_namespace`.
@@ -54,145 +61,187 @@ robot_namespace = rlh.compute_robot_namespace('/robots', 'front')
 robot_prefix = rlh.compute_robot_prefix('front')
 ```
 
-## Example Usage
+## Launch action options
 
-Each launch file resolves the effective node name from its own launch argument. The node name is not read from the JSON options. This keeps node identity explicit in the launch file that creates the node, while the JSON strings keep the node options, remappings, and logging options easy to pass through `IncludeLaunchDescription`.
+Use `launch_action_options_json_str` when a launch file should let the application configure optional fields of `Node`, `ExecuteProcess`, or `ExecuteLocal`.
+
+Without this helper, the launch file would need one launch argument for every optional field. That becomes hard to read when a launch file starts several nodes or processes.
+
+With this helper, the launch file receives one JSON string. The JSON string contains one object per action. Each object is stored under a stable key chosen by the launch file.
+
+Some fields should still stay in the Python launch file. For example, the launch file should normally keep `package`, `executable`, `namespace`, `parameters`, and `cmd` visible in Python code. For the longer explanation, see [Launch Action Options Technical Design](doc/launch_action_options_design.md).
+
+Resolve the JSON string inside code that has a `LaunchContext`. A common pattern is to do it inside an `OpaqueFunction` callback. The callback reads the JSON string, gets the options for one action key, and passes those options to the action with `**bridge_options`.
 
 ```python
 import ros2_launch_helpers as rlh
-from launch.actions import DeclareLaunchArgument
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
-DeclareLaunchArgument(
-    'node_name',
-    default_value='ground_vehicle_twist_odometry',
-    description='Node name',
-)
-DeclareLaunchArgument(
-    'node_options',
-    default_value=rlh.default_node_options_json_str(),
-    description=rlh.NODE_OPTIONS_DESC,
-)
-DeclareLaunchArgument(
-    'node_logging_options',
-    default_value=rlh.default_node_logging_options_json_str(),
-    description=rlh.LOGGING_OPTIONS_DESC,
-)
-DeclareLaunchArgument(
-    'node_remappings',
-    default_value=rlh.default_node_remappings_json_str(),
-    description=rlh.REMAPPINGS_DESC,
-)
 
-node_name = LaunchConfiguration('node_name').perform(ctx)
-node_options_by_name, remappings_by_name, ros_arguments_by_name = (
-    rlh.resolve_node_launch_configs(
-        node_names=[node_name],
-        node_options=LaunchConfiguration('node_options').perform(ctx),
-        node_logging_options=LaunchConfiguration('node_logging_options').perform(ctx),
-        node_remappings=LaunchConfiguration('node_remappings').perform(ctx),
+def launch_setup(ctx):
+    launch_action_options = rlh.resolve_launch_action_options(
+        LaunchConfiguration('launch_action_options_json_str').perform(ctx)
     )
-)
 
-node_options = node_options_by_name[node_name]
-remappings = remappings_by_name[node_name]
-ros_arguments = ros_arguments_by_name[node_name]
+    bridge_options = rlh.get_launch_action_options(
+        launch_action_options,
+        'bridge',
+        defaults={
+            'name': 'bridge',
+            'output': 'screen',
+            'emulate_tty': True,
+        },
+    )
 
-parameters = rlh.get_parameters(params_file, overlay_params_file_list)
+    return [
+        Node(
+            package='ros_gz_bridge',
+            executable='bridge_node',
+            namespace=LaunchConfiguration('robot_namespace'),
+            **bridge_options,
+        )
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('robot_namespace', default_value=''),
+        DeclareLaunchArgument(
+            'launch_action_options_json_str',
+            default_value=rlh.default_launch_action_options_json_str(),
+            description=rlh.LAUNCH_ACTION_OPTIONS_DESC,
+        ),
+        OpaqueFunction(function=launch_setup),
+    ])
 ```
 
-For launch files that create more than one node, pass all effective node names in `node_names`. The function returns one dictionary per output type, indexed by node name.
+The helper applies no global defaults. Each launch file supplies defaults for the action it is creating. If the JSON object defines the same field, the JSON value wins.
 
-## Node JSON Arguments
+## JSON format
 
-The node-related launch arguments are JSON objects indexed by effective node name. Their default launch argument value is `"{}"`, which means "there are no overrides for any node". The real defaults for node options and logging are stored in `ros2_launch_helpers` and are applied when a node has no entry or only a partial entry.
+The default launch argument value is `"{}"`, which means "there are no overrides for any action".
 
-`node_options` is indexed by the effective node name. It does not contain a `name` field:
+Example CLI override:
+
+```bash
+ros2 launch my_robot bringup.launch.py \
+  launch_action_options_json_str:='{"bridge":{"output":"screen","respawn":true,"respawn_delay":2.0}}'
+```
+
+Example `launch_action_options_json_str` value. This is one JSON string with two objects inside it:
 
 ```json
 {
-  "front_odometry": {
+  "speed_controller": {
+    "name": "spd_controller",
     "output": "screen",
     "emulate_tty": true,
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": ["--log-level", "debug"],
+    "remappings": [
+      ["battery_state", "state/battery"],
+      ["cmd_vel", "commands/velocity"]
+    ],
+    "additional_env": {
+      "RCUTILS_COLORIZED_OUTPUT": "1"
+    }
+  },
+  "bridge": {
+    "name": "robot_bridge",
+    "output": "log",
     "respawn": false,
-    "respawn_delay": 0.0
+    "respawn_delay": null
   }
 }
 ```
 
-`node_logging_options` is indexed by the effective node name. Known keys configure the node logger. Any other key is treated as a custom logger name:
+## Supported fields
+
+The supported fields come from `Node`, `ExecuteProcess`, and `ExecuteLocal`. The helper accepts only JSON-compatible values for those fields. When a field is optional in the original ROS 2 constructor, `null` is accepted and becomes Python `None`.
+
+From `launch_ros.actions.Node`:
+
+- `name`: string preferred, `list[string]` and null accepted. For `Node`, this is the ROS node name.
+- `exec_name`: string preferred, `list[string]` and null accepted. For `Node`, this is forwarded as the launch process label.
+- `remappings`: list of two-item lists or null. The helper converts each pair into a tuple for `Node`.
+- `ros_arguments`: `list[string]` or null.
+- `arguments`: `list[string]` or null.
+
+From `launch.actions.ExecuteProcess`:
+
+- `name`: string preferred, `list[string]` and null accepted. For `ExecuteProcess`, this is the launch process label.
+- `prefix`: string preferred, `list[string]` and null accepted.
+- `cwd`: string preferred, `list[string]` and null accepted.
+- `env`: object with string keys and string values, or null.
+- `additional_env`: object with string keys and string values, or null.
+
+From `launch.actions.ExecuteLocal`:
+
+- `shell`: boolean.
+- `sigterm_timeout`: string preferred, `list[string]` accepted.
+- `sigkill_timeout`: string preferred, `list[string]` accepted.
+- `emulate_tty`: boolean.
+- `output`: string preferred, `list[string]` accepted.
+- `output_format`: string.
+- `cached_output`: boolean.
+- `log_cmd`: boolean.
+- `respawn`: boolean.
+- `respawn_delay`: number or null.
+- `respawn_max_retries`: integer.
+
+The helper rejects fields that should stay explicit in the launch file:
+
+- `package`
+- `executable`
+- `namespace`
+- `parameters`
+- `cmd`
+- `process_description`
+- `on_exit`
+- `condition`
+
+See [doc/launch_action_options_design.md](doc/launch_action_options_design.md) for the full design notes. That document also lists the ROS 2 source files used to define this supported field list.
+
+## SomeSubstitutionsType values
+
+When a field accepts ROS 2 launch `SomeSubstitutionsType`, the JSON value may be a string or a list of strings. Prefer the string form. JSON cannot represent launch `Substitution` objects such as `LaunchConfiguration` or `FindPackageShare`. In this helper, the list form only concatenates strings, so it is usually harder to read.
+
+Preferred:
 
 ```json
 {
-  "front_odometry": {
-    "log-level": "info",
-    "disable-stdout-logs": false,
-    "disable-rosout-logs": false,
-    "disable-external-lib-logs": false,
-    "some.logger.name": "debug"
+  "bridge": {
+    "sigterm_timeout": "2.5"
   }
 }
 ```
 
-Use `log-level` when you want to configure the main logger for the node launched by this launch file:
+Accepted:
 
 ```json
 {
-  "front_odometry": {
-    "log-level": "debug"
+  "bridge": {
+    "sigterm_timeout": ["2", ".", "5"]
   }
 }
 ```
 
-Use an explicit logger name when the code creates or uses a logger with that exact name. For example, code that calls `rclcpp::get_logger("solver")` is configured with the `solver` key:
+`list[string]` is concatenated. For example, `["2", "5"]` becomes `"25"` seconds.
 
-```json
-{
-  "front_odometry": {
-    "solver": "debug"
-  }
-}
-```
+## Name and exec name
 
-Use the full child logger name when the code creates a child logger from the node logger. For a node named `front_odometry`, code that calls `node->get_logger().get_child("twist_cb")` usually creates the logger `front_odometry.twist_cb`:
+The `name` field has the same meaning it would have if written directly in Python launch code.
 
-```json
-{
-  "front_odometry": {
-    "front_odometry.twist_cb": "debug"
-  }
-}
-```
+When options are passed to `Node`, `name` is the ROS node name and `exec_name` is the launch process label forwarded to `ExecuteProcess.name`.
 
-If the node is launched in the `robot` namespace, the logger name can include that namespace. In that case, configure the full logger name:
+When options are passed directly to `ExecuteProcess`, `name` is the launch process label and `exec_name` is not accepted.
 
-```json
-{
-  "front_odometry": {
-    "robot.front_odometry.twist_cb": "debug"
-  }
-}
-```
+## When to use
 
-The `front_odometry` key outside the logging options selects which launched node receives these ROS arguments. The keys inside that object are either known logging options or exact logger names passed to ROS 2.
-
-`node_remappings` is indexed by the effective node name:
-
-```json
-{
-  "front_odometry": [
-    "/input_twist:=/cmd_vel",
-    "odom:=wheel_odom"
-  ]
-}
-```
-
-The effective node name is the value passed to the launch file through its local `node_name` argument, or the launch file default when no parent launch file overrides it. If a parent launch file changes `node_name`, the JSON entries for node options, logging options, and remappings must use the new effective node name.
-
-The JSON objects may contain entries for nodes that a launch file does not use. Those entries are ignored by that launch file and are not validated unless that node name is requested.
-
-## When to Use
-
-- When a launch file should accept structured node options without declaring one launch argument per option.
-- When parent launch files should be able to pass node remappings or logging options to included launch files.
-- When a launch file creates one or more nodes and needs the processed options in the exact shape expected by `launch_ros.actions.Node`.
+- When a launch file should accept optional launch action options without declaring one launch argument per option.
+- When parent launch files should be able to pass process options or remappings to included launch files.
+- When a launch file creates one or more actions and needs processed options in the shape expected by ROS 2 launch.

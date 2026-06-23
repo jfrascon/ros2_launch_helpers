@@ -9,13 +9,13 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/doc', ['doc/launch_action_options_design.md']),
     ],
     install_requires=['setuptools', 'PyYAML'],
     zip_safe=True,
     maintainer='Juan Francisco Rascon Crespo',
     maintainer_email='jfracon@gmail.com',
-    description='Helpers for ROS 2 launch files: params overlays + capsule + CLI overrides '
-    '(remappings/node_options/ros_args)',
+    description='Helpers for ROS 2 launch files: params overlays, launch action options, and CLI overrides',
     license='Apache-2.0',
     extras_require={'test': ['pytest']},
     entry_points={'console_scripts': []},

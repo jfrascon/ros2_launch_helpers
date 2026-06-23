@@ -11,46 +11,21 @@ from launch import LaunchContext, LaunchDescriptionEntity
 from launch.actions import LogInfo
 from launch_ros.parameter_descriptions import ParameterFile
 
-DEFAULT_LOGGING_OPTIONS = {
-    'log-level': 'info',  # One of: 'debug', 'info', 'warn', 'error'
-    'disable-stdout-logs': False,  # Whether to disable writing log messages to the console
-    'disable-rosout-logs': False,  # Whether to disable writing log messages out to /rosout
-    'disable-external-lib-logs': False,  # Whether to completely disable external loggers
+LAUNCH_ACTION_OPTIONS_DESC = (
+    'JSON string containing an object indexed by lookup key. Each object can set supported options for '
+    'launch_ros.actions.Node, launch.actions.ExecuteProcess, or launch.actions.ExecuteLocal.'
+)
+
+_REJECTED_LAUNCH_ACTION_OPTIONS = {
+    'package',
+    'executable',
+    'namespace',
+    'parameters',
+    'cmd',
+    'process_description',
+    'on_exit',
+    'condition',
 }
-
-
-LOGGING_OPTIONS_DESC = (
-    'JSON object indexed by current node name. Each node entry can set "log-level", '
-    '"disable-stdout-logs", "disable-rosout-logs", "disable-external-lib-logs", '
-    'and custom logger levels.'
-)
-
-# `emulate_tty` makes the process see stdout and stderr as a terminal instead of a plain pipe.
-# This does not change ROS behavior. It only affects console details such as colors, buffering,
-# and log formatting. It is useful when a human reads the output on screen, and usually not useful
-# when launch writes the output only to log files.
-#
-# Practical rule:
-# - output='screen' -> emulate_tty=True can be useful.
-# - output='both'   -> emulate_tty=True can be useful.
-# - output='log'    -> emulate_tty=False is normally the better default.
-DEFAULT_NODE_OPTIONS = {
-    'output': 'screen',  # One of: 'screen', 'log', 'both'
-    'emulate_tty': True,  # Whether to emulate a TTY for the node's stdout/stderr
-    'respawn': False,  # Whether to respawn the node if it dies
-    'respawn_delay': 0.0,  # Delay in seconds before respawning a node
-}
-
-
-NODE_OPTIONS_DESC = (
-    'JSON object indexed by current node name. Each node entry can set "output", '
-    '"emulate_tty", "respawn", and "respawn_delay".'
-)
-
-REMAPPINGS_DESC = (
-    'JSON object indexed by current node name. Each node entry is a list of '
-    'remapping strings using the "from:=to" syntax.'
-)
 
 
 class FileResolutionError(ValueError):
@@ -69,18 +44,6 @@ class InvalidFileUriPatternError(FileResolutionError):
     """
     Raised when a file URI does not follow one of the URI formats accepted by ``resolve_file``.
     """
-
-
-def default_node_logging_options_json_str() -> str:
-    return '{}'
-
-
-def default_node_options_json_str() -> str:
-    return '{}'
-
-
-def default_node_remappings_json_str() -> str:
-    return '{}'
 
 
 def compute_global_namespace(namespace: str) -> str:
@@ -109,6 +72,10 @@ def compute_robot_prefix(robot_name: str) -> str:
     return to_prefix(robot_name)
 
 
+def default_launch_action_options_json_str() -> str:
+    return '{}'
+
+
 def flatten_namespace(namespace: str, new_sep: str) -> str:
     """
     Flatten a namespace into a non-hierarchical string.
@@ -126,6 +93,35 @@ def flatten_namespace(namespace: str, new_sep: str) -> str:
         return ''
 
     return replace_separator_in_namespace(namespace.strip('/'), new_sep)
+
+
+def get_launch_action_options(
+    launch_action_options: Dict[str, Dict[str, Any]], key: str, defaults: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Return options for one lookup key, merging local defaults first.
+
+    The launch file owns the defaults because different actions often need different names,
+    process options, and logging behavior.
+    """
+    if not isinstance(launch_action_options, dict):
+        raise ValueError('launch_action_options must be a dictionary')
+
+    if not isinstance(key, str) or not key:
+        raise ValueError('key must be a non-empty string')
+
+    if defaults is None:
+        defaults = {}
+
+    if not isinstance(defaults, dict):
+        raise ValueError('defaults must be a dictionary')
+
+    options = launch_action_options.get(key, {})
+
+    if not isinstance(options, dict):
+        raise ValueError(f"launch action options object '{key}' must be a dictionary")
+
+    return {**defaults, **options}
 
 
 def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
@@ -252,6 +248,35 @@ def is_valid_namespace(ns: str) -> bool:
     return True
 
 
+def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
+    """
+    Read and parse a YAML file, returning both the resolved path and the loaded object.
+
+    :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
+    :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be
+        ``None`` when the file contains only comments/whitespace.
+    :raises NullFilePathError: If no YAML file path or URI is provided.
+    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI
+        formats.
+    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package
+        index.
+    :raises FileNotFoundError: If the resolved path does not point to a file.
+    :raises yaml.YAMLError: If the YAML syntax is invalid.
+    :raises OSError: If the file cannot be read.
+    :raises UnicodeDecodeError: If the file is not valid UTF-8.
+    """
+    resolved_yaml_file = resolve_file(yaml_file)
+    resolved_yaml_path = Path(resolved_yaml_file)
+
+    if not resolved_yaml_path.is_file():
+        raise FileNotFoundError(f"Path '{resolved_yaml_file}' does not point to a file")
+
+    with resolved_yaml_path.open('r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+
+    return (resolved_yaml_file, data)
+
+
 def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str:
     """
     Render one ROS parameter YAML file.
@@ -291,304 +316,6 @@ def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str
         parameter_file.cleanup()
 
     return str(output_path)
-
-
-def _make_rendered_params_file_path() -> Path:
-    """
-    Create a unique temporary YAML path for rendered ROS params.
-
-    The file is created immediately so concurrent launches cannot choose the same path. The caller
-    can overwrite it with the rendered YAML content.
-    """
-    with NamedTemporaryFile(prefix='robot_params_', suffix='.yaml', delete=False) as temp_file:
-        return Path(temp_file.name)
-
-
-def resolve_node_launch_configs(
-    node_names: List[str],
-    node_options: Optional[str],
-    node_logging_options: Optional[str],
-    node_remappings: Optional[str],
-) -> Tuple[
-    Dict[str, Dict[str, Union[str, bool, float]]], Dict[str, Optional[List[Tuple[str, str]]]], Dict[str, List[str]]
-]:
-    if not isinstance(node_names, list):
-        raise ValueError('node_names must be a list of node names')
-
-    for index, node_name in enumerate(node_names):
-        _NodeLaunchConfig.validate_node_name(node_name, f'node_names item {index}')
-
-    config = _NodeLaunchConfig.from_json_strings(
-        node_options=node_options, node_logging_options=node_logging_options, node_remappings=node_remappings
-    )
-
-    node_options_by_name: Dict[str, Dict[str, Union[str, bool, float]]] = {}
-    remappings_by_name: Dict[str, Optional[List[Tuple[str, str]]]] = {}
-    ros_arguments_by_name: Dict[str, List[str]] = {}
-
-    for node_name in node_names:
-        node_options_by_name[node_name] = config.options_for(node_name)
-        remappings_by_name[node_name] = config.remappings_for(node_name)
-        ros_arguments_by_name[node_name] = config.logging_ros_arguments_for(node_name)
-
-    return node_options_by_name, remappings_by_name, ros_arguments_by_name
-
-
-class _NodeLaunchConfig:
-    """
-    Store node launch overrides from the three JSON launch arguments.
-
-    Each JSON value is a map indexed by the effective node name used by the launch file.
-    """
-
-    _LOG_LEVELS = ('debug', 'info', 'warn', 'error')
-    _CUSTOM_LOG_LEVELS = ('debug', 'info', 'warn', 'error', 'fatal')
-    _LOGGING_BOOLEAN_KEYS = ('disable-stdout-logs', 'disable-rosout-logs', 'disable-external-lib-logs')
-    _OUTPUT_VALUES = ('screen', 'log', 'both')
-
-    def __init__(
-        self, node_options: Dict[str, Any], node_logging_options: Dict[str, Any], node_remappings: Dict[str, Any]
-    ) -> None:
-        self._node_options = node_options
-        self._node_logging_options = node_logging_options
-        self._node_remappings = node_remappings
-
-    @classmethod
-    def from_json_strings(
-        cls, node_options: Optional[str], node_logging_options: Optional[str], node_remappings: Optional[str]
-    ) -> '_NodeLaunchConfig':
-        return cls(
-            node_options=cls._parse_json_map(node_options, 'node_options'),
-            node_logging_options=cls._parse_json_map(node_logging_options, 'node_logging_options'),
-            node_remappings=cls._parse_json_map(node_remappings, 'node_remappings'),
-        )
-
-    def logging_ros_arguments_for(self, current_node_name: str) -> List[str]:
-        self.validate_node_name(current_node_name, 'current_node_name')
-        logging_options: Dict[str, Union[str, bool]] = DEFAULT_LOGGING_OPTIONS.copy()
-        node_logging_options = self._entry_for(self._node_logging_options, current_node_name, 'node_logging_options')
-
-        if node_logging_options is None:
-            return self._logging_options_to_ros_args(logging_options)
-
-        if not isinstance(node_logging_options, dict):
-            raise ValueError(f"node_logging_options entry for node '{current_node_name}' must be a JSON object")
-
-        for key, value in node_logging_options.items():
-            if not isinstance(key, str) or not key:
-                raise ValueError(f"node_logging_options for node '{current_node_name}' has an invalid key")
-
-            if key == 'log-level':
-                logging_options[key] = self._validate_log_level(value, current_node_name, key)
-            elif key in self._LOGGING_BOOLEAN_KEYS:
-                logging_options[key] = self._validate_bool(value, 'node_logging_options', current_node_name, key)
-            else:
-                logging_options[key] = self._validate_custom_log_level(value, current_node_name, key)
-
-        return self._logging_options_to_ros_args(logging_options)
-
-    def options_for(self, current_node_name: str) -> Dict[str, Union[str, bool, float]]:
-        self.validate_node_name(current_node_name, 'current_node_name')
-        node_options: Dict[str, Union[str, bool, float]] = DEFAULT_NODE_OPTIONS.copy()
-        node_options_overrides = self._entry_for(self._node_options, current_node_name, 'node_options')
-
-        if node_options_overrides is None:
-            return node_options
-
-        if not isinstance(node_options_overrides, dict):
-            raise ValueError(f"node_options entry for node '{current_node_name}' must be a JSON object")
-
-        for key, value in node_options_overrides.items():
-            if key not in DEFAULT_NODE_OPTIONS:
-                raise ValueError(f"node_options for node '{current_node_name}' has unknown key '{key}'")
-
-            match key:
-                case 'output':
-                    node_options[key] = self._validate_output(value, current_node_name)
-                case 'emulate_tty':
-                    node_options[key] = self._validate_bool(value, 'node_options', current_node_name, key)
-                case 'respawn':
-                    node_options[key] = self._validate_bool(value, 'node_options', current_node_name, key)
-                case 'respawn_delay':
-                    node_options[key] = self._validate_number(value, 'node_options', current_node_name, key)
-                case _:  # Should never happen because unknown keys are rejected above.
-                    pass
-
-        return node_options
-
-    def remappings_for(self, current_node_name: str) -> Optional[List[Tuple[str, str]]]:
-        self.validate_node_name(current_node_name, 'current_node_name')
-        node_remappings = self._entry_for(self._node_remappings, current_node_name, 'node_remappings')
-
-        if node_remappings is None:
-            return None
-
-        if not isinstance(node_remappings, list):
-            raise ValueError(f"node_remappings entry for node '{current_node_name}' must be a JSON list")
-
-        remappings: List[Tuple[str, str]] = []
-        for index, remapping in enumerate(node_remappings):
-            if not isinstance(remapping, str):
-                raise ValueError(f"node_remappings item {index} for node '{current_node_name}' must be a string")
-
-            try:
-                original_topic, new_topic = remapping.split(':=', maxsplit=1)
-            except ValueError as e:
-                raise ValueError(
-                    f"node_remappings item {index} for node '{current_node_name}' must use 'from:=to' syntax"
-                ) from e
-
-            if not original_topic:
-                raise ValueError(
-                    f"node_remappings item {index} for node '{current_node_name}' must have a non-empty 'from'"
-                )
-
-            if not new_topic:
-                raise ValueError(
-                    f"node_remappings item {index} for node '{current_node_name}' must have a non-empty 'to'"
-                )
-
-            remappings.append((original_topic, new_topic))
-
-        return remappings
-
-    @staticmethod
-    def _entry_for(values: Dict[str, Any], current_node_name: str, field_name: str) -> Optional[Any]:
-        try:
-            return values[current_node_name]
-        except KeyError:
-            return None
-        except TypeError as e:
-            raise ValueError(f'{field_name} must be a JSON object') from e
-
-    @staticmethod
-    def _logging_options_to_ros_args(logging_options: Dict[str, Any]) -> List[str]:
-        args = []
-
-        for key, value in logging_options.items():
-            if key == 'log-level':
-                if value:
-                    args.extend(['--log-level', value])
-            elif key in _NodeLaunchConfig._LOGGING_BOOLEAN_KEYS:
-                if value:
-                    args.append(f'--{key}')
-            elif value:
-                args.extend(['--log-level', f'{key}:={value}'])
-
-        return args
-
-    @staticmethod
-    def _parse_json_map(value: Optional[str], field_name: str) -> Dict[str, Any]:
-        if value is None:
-            return {}
-
-        if not isinstance(value, str):
-            raise ValueError(f'{field_name} must be a JSON string')
-
-        value = value.strip()
-        if not value:
-            return {}
-
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as e:
-            raise ValueError(f'{field_name} must be valid JSON') from e
-
-        if not isinstance(parsed, dict):
-            raise ValueError(f'{field_name} must be a JSON object')
-
-        return parsed
-
-    @staticmethod
-    def _validate_bool(value: Any, field_name: str, current_node_name: str, key: str) -> bool:
-        if not isinstance(value, bool):
-            raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a boolean")
-
-        return value
-
-    @classmethod
-    def _validate_custom_log_level(cls, value: Any, current_node_name: str, key: str) -> str:
-        level = cls._validate_string(value, 'node_logging_options', current_node_name, key).lower()
-        if level not in cls._CUSTOM_LOG_LEVELS:
-            raise ValueError(
-                f"node_logging_options custom logger '{key}' for node '{current_node_name}' has invalid level '{value}'"
-            )
-
-        return level
-
-    @classmethod
-    def _validate_log_level(cls, value: Any, current_node_name: str, key: str) -> str:
-        level = cls._validate_string(value, 'node_logging_options', current_node_name, key).lower()
-        if level not in cls._LOG_LEVELS:
-            raise ValueError(f"node_logging_options '{key}' for node '{current_node_name}' has invalid level '{value}'")
-
-        return level
-
-    @staticmethod
-    def validate_node_name(node_name: str, field_name: str) -> None:
-        if not isinstance(node_name, str) or not node_name:
-            raise ValueError(f'{field_name} must be a non-empty string')
-
-        if not is_valid_name(node_name):
-            raise ValueError(f"{field_name} must be ASCII [A-Za-z0-9_] only: '{node_name}'")
-
-    @staticmethod
-    def _validate_number(value: Any, field_name: str, current_node_name: str, key: str) -> float:
-        if isinstance(value, bool) or not isinstance(value, (float, int)):
-            raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a number")
-
-        numeric_value = float(value)
-        if not math.isfinite(numeric_value) or numeric_value < 0:
-            raise ValueError(
-                f"{field_name} '{key}' for node '{current_node_name}' must be a finite number "
-                'greater than or equal to 0'
-            )
-
-        return numeric_value
-
-    @classmethod
-    def _validate_output(cls, value: Any, current_node_name: str) -> str:
-        output = cls._validate_string(value, 'node_options', current_node_name, 'output')
-        if output not in cls._OUTPUT_VALUES:
-            raise ValueError(f"node_options 'output' for node '{current_node_name}' has invalid value '{value}'")
-
-        return output
-
-    @staticmethod
-    def _validate_string(value: Any, field_name: str, current_node_name: str, key: str) -> str:
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{field_name} '{key}' for node '{current_node_name}' must be a non-empty string")
-
-        return value
-
-
-def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
-    """
-    Read and parse a YAML file, returning both the resolved path and the loaded object.
-
-    :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
-    :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be
-        ``None`` when the file contains only comments/whitespace.
-    :raises NullFilePathError: If no YAML file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI
-        formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package
-        index.
-    :raises FileNotFoundError: If the resolved path does not point to a file.
-    :raises yaml.YAMLError: If the YAML syntax is invalid.
-    :raises OSError: If the file cannot be read.
-    :raises UnicodeDecodeError: If the file is not valid UTF-8.
-    """
-    resolved_yaml_file = resolve_file(yaml_file)
-    resolved_yaml_path = Path(resolved_yaml_file)
-
-    if not resolved_yaml_path.is_file():
-        raise FileNotFoundError(f"Path '{resolved_yaml_file}' does not point to a file")
-
-    with resolved_yaml_path.open('r', encoding='utf-8') as f:
-        data = yaml.safe_load(f)
-
-    return (resolved_yaml_file, data)
 
 
 def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
@@ -677,6 +404,98 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
     return os.path.expanduser(file)
 
 
+def resolve_launch_action_options(options_json_str: Optional[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Parse one JSON launch action options object into dictionaries suitable for ``**kwargs``.
+
+    The JSON root must be an object indexed by lookup key. The key is chosen by the launch
+    file and is only used to retrieve the options for one action. It does not have to match the ROS
+    node name or the process name.
+
+    Example input:
+
+    .. code-block:: json
+
+        {
+          "speed_controller": {
+            "name": "spd_controller",
+            "output": "screen",
+            "emulate_tty": true,
+            "respawn": true,
+            "remappings": [
+              ["battery_state", "state/battery"],
+              ["cmd_vel", "commands/velocity"]
+            ]
+          },
+          "bridge": {
+            "name": "robot_bridge",
+            "output": "log",
+            "respawn": false
+          }
+        }
+
+    The returned value for the example above is:
+
+    .. code-block:: python
+
+        {
+            'speed_controller': {
+                'name': 'spd_controller',
+                'output': 'screen',
+                'emulate_tty': True,
+                'respawn': True,
+                'remappings': [
+                    ('battery_state', 'state/battery'),
+                    ('cmd_vel', 'commands/velocity')
+                ]
+            },
+            'bridge': {
+                'name': 'robot_bridge',
+                'output': 'log',
+                'respawn': False
+            }
+        }
+
+    Each object in the JSON input must use only the permitted fields from ``Node``,
+    ``ExecuteProcess``, or ``ExecuteLocal``.
+    Rejected fields are defined in ``_REJECTED_LAUNCH_ACTION_OPTIONS`` and explained in the
+    technical design document. The helper checks JSON types and converts only values that JSON
+    cannot represent directly, such as ``remappings`` pairs into Python tuples.
+    """
+
+    if options_json_str is None:
+        return {}
+
+    if not isinstance(options_json_str, str):
+        raise ValueError('launch_action_options_json_str must be a JSON string')
+
+    options_json_str = options_json_str.strip()
+
+    if not options_json_str:
+        return {}
+
+    try:
+        options = json.loads(options_json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError('launch_action_options_json_str must be valid JSON') from e
+
+    if not isinstance(options, dict):
+        raise ValueError('launch_action_options_json_str must be a JSON object')
+
+    validated_options: Dict[str, Dict[str, Any]] = {}
+
+    for action_key, action_options in options.items():
+        if not isinstance(action_key, str) or not action_key:
+            raise ValueError('launch_action_options keys must be non-empty strings')
+
+        if not isinstance(action_options, dict):
+            raise ValueError(f"launch_action_options object '{action_key}' must be a JSON object")
+
+        validated_options[action_key] = _validate_launch_action_options(action_key, action_options)
+
+    return validated_options
+
+
 def resolve_name(parent_namespace: str, child_name: str) -> str:
     """
     Resolve `child_name` with respect to `parent_namespace`.
@@ -724,20 +543,6 @@ def resolve_name(parent_namespace: str, child_name: str) -> str:
     return parent_namespace.rstrip('/') + '/' + child_name.rstrip('/')
 
 
-def to_prefix(name: str) -> str:
-    if not isinstance(name, str):
-        raise ValueError('name must be a string to create a prefix')
-
-    if not is_valid_name(name):
-        raise RuntimeError(f"'{name}' must be a non-empty string with ASCII [A-Za-z0-9_] only to create a prefix")
-
-    # If the name already ends with '_', return it as is.
-    if name.endswith('_'):
-        return name
-    else:
-        return f'{name}_'
-
-
 def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
     """
     Convert a list of text messages into launch LogInfo entities.
@@ -754,3 +559,296 @@ def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
             entities.append(LogInfo(msg=msg))
 
     return entities
+
+
+def to_prefix(name: str) -> str:
+    if not isinstance(name, str):
+        raise ValueError('name must be a string to create a prefix')
+
+    if not is_valid_name(name):
+        raise RuntimeError(f"'{name}' must be a non-empty string with ASCII [A-Za-z0-9_] only to create a prefix")
+
+    # If the name already ends with '_', return it as is.
+    if name.endswith('_'):
+        return name
+    else:
+        return f'{name}_'
+
+
+def _make_rendered_params_file_path() -> Path:
+    """
+    Create a unique temporary YAML path for rendered ROS params.
+
+    The file is created immediately so concurrent launches cannot choose the same path. The caller
+    can overwrite it with the rendered YAML content.
+    """
+    with NamedTemporaryFile(prefix='robot_params_', suffix='.yaml', delete=False) as temp_file:
+        return Path(temp_file.name)
+
+
+def _validate_bool(action_key: str, option_name: str, option_value: object) -> bool:
+    """
+    Validate one JSON boolean option.
+
+    This is used for options such as ``emulate_tty`` and ``respawn``. JSON must contain
+    ``true`` or ``false``. Strings such as ``"true"`` are rejected.
+    """
+    if not isinstance(option_value, bool):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be a boolean")
+
+    return option_value
+
+
+def _validate_int(action_key: str, option_name: str, option_value: object) -> int:
+    """
+    Validate one integer option.
+
+    This is used for ``respawn_max_retries``. JSON must contain an integer number. Booleans are
+    rejected even though Python treats ``bool`` as a subclass of ``int``.
+    """
+    if isinstance(option_value, bool) or not isinstance(option_value, int):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be an integer")
+
+    return option_value
+
+
+def _validate_launch_action_options(action_key: str, options: Dict[str, object]) -> Dict[str, Any]:
+    """
+    Validate the options object for one action key.
+
+    Continuing the example from ``resolve_launch_action_options``, when ``action_key`` is
+    ``'speed_controller'``, ``options`` is the object stored under that key. This function checks
+    each field in that object, rejects fields that must stay in the launch file, and converts
+    ``remappings`` from JSON lists into Python tuples.
+    """
+    validated_options: Dict[str, Any] = {}
+
+    for option_name, option_value in options.items():
+        if not isinstance(option_name, str) or not option_name:
+            raise ValueError(f"launch action option name for key '{action_key}' must be a non-empty string")
+
+        if option_name in _REJECTED_LAUNCH_ACTION_OPTIONS:
+            raise ValueError(
+                f"launch action options field '{option_name}' for key '{action_key}' must be written in the launch file"
+            )
+
+        match option_name:
+            case 'name' | 'exec_name' | 'prefix' | 'cwd':
+                validated_options[option_name] = _validate_optional_some_substitutions_type(
+                    action_key, option_name, option_value
+                )
+            case 'sigterm_timeout' | 'sigkill_timeout' | 'output':
+                validated_options[option_name] = _validate_some_substitutions_type(
+                    action_key, option_name, option_value
+                )
+            case 'ros_arguments' | 'arguments':
+                validated_options[option_name] = _validate_optional_string_list(action_key, option_name, option_value)
+            case 'remappings':
+                validated_options[option_name] = _validate_optional_remappings(action_key, option_name, option_value)
+            case 'env' | 'additional_env':
+                validated_options[option_name] = _validate_optional_env_map(action_key, option_name, option_value)
+            case 'shell' | 'emulate_tty' | 'cached_output' | 'log_cmd' | 'respawn':
+                validated_options[option_name] = _validate_bool(action_key, option_name, option_value)
+            case 'output_format':
+                validated_options[option_name] = _validate_string(action_key, option_name, option_value)
+            case 'respawn_delay':
+                validated_options[option_name] = _validate_optional_float(action_key, option_name, option_value)
+            case 'respawn_max_retries':
+                validated_options[option_name] = _validate_int(action_key, option_name, option_value)
+            case _:
+                raise ValueError(f"launch action options field '{option_name}' for key '{action_key}' is not supported")
+
+    return validated_options
+
+
+def _validate_optional_env_map(
+    action_key: str, option_name: str, option_value: object
+) -> Optional[Dict[str, str]]:
+    """
+    Validate Optional[Dict[SomeSubstitutionsType, SomeSubstitutionsType]] = None.
+
+    This is used for ``env`` and ``additional_env``. JSON may contain an object or ``null``.
+    ``null`` is returned as Python ``None`` because the original ROS 2 type is optional.
+    """
+    if option_value is None:
+        return None
+
+    if not isinstance(option_value, dict):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be a JSON object")
+
+    for env_key, env_value in option_value.items():
+        if not isinstance(env_key, str) or not env_key:
+            raise ValueError(
+                f"launch action options '{option_name}' for key '{action_key}' must have non-empty string keys"
+            )
+
+        if not isinstance(env_value, str):
+            raise ValueError(f"launch action options '{option_name}.{env_key}' for key '{action_key}' must be a string")
+
+    return dict(option_value)
+
+
+def _validate_optional_float(action_key: str, option_name: str, option_value: object) -> Optional[float]:
+    """
+    Validate Optional[float] = None.
+
+    This is used for ``respawn_delay``. JSON may contain a number or ``null``. Booleans are
+    rejected even though Python treats ``bool`` as a subclass of ``int``.
+    """
+    if option_value is None:
+        return None
+
+    if isinstance(option_value, bool) or not isinstance(option_value, (float, int)):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be a number or null")
+
+    numeric_value = float(option_value)
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be finite")
+
+    return numeric_value
+
+
+def _validate_optional_remappings(
+    action_key: str, option_name: str, option_value: object
+) -> Optional[List[Tuple[str, str]]]:
+    """
+    Validate Optional[SomeRemapRules] = None.
+
+    JSON may contain a list of remapping pairs or ``null``. ``null`` is returned as Python
+    ``None`` because the original ROS 2 type is optional.
+    """
+    if option_value is None:
+        return None
+
+    if not isinstance(option_value, list):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be a JSON list")
+
+    remappings: List[Tuple[str, str]] = []
+
+    for index, remapping in enumerate(option_value):
+        if not isinstance(remapping, list) or len(remapping) != 2:
+            raise ValueError(
+                f"launch action options 'remappings' item {index} for key '{action_key}' must be a two-item list"
+            )
+
+        original_name, new_name = remapping
+
+        if not isinstance(original_name, str) or not original_name:
+            raise ValueError(
+                f"launch action options 'remappings' item {index} for key '{action_key}' "
+                'must have a non-empty string source'
+            )
+
+        if not isinstance(new_name, str) or not new_name:
+            raise ValueError(
+                f"launch action options 'remappings' item {index} for key '{action_key}' "
+                'must have a non-empty string target'
+            )
+
+        remappings.append((original_name, new_name))
+
+    return remappings
+
+
+def _validate_optional_some_substitutions_type(
+    action_key: str, option_name: str, option_value: object
+) -> Optional[Union[str, List[str]]]:
+    """
+    Validate Optional[SomeSubstitutionsType] = None.
+
+    JSON may contain a string, a list of strings, or ``null``. ``null`` is returned as Python
+    ``None`` because the original ROS 2 type is optional.
+    """
+    if option_value is None:
+        return None
+
+    return _validate_some_substitutions_type(action_key, option_name, option_value)
+
+
+def _validate_optional_string_list(
+    action_key: str, option_name: str, option_value: object
+) -> Optional[List[str]]:
+    """
+    Validate Optional[Iterable[SomeSubstitutionsType]] = None.
+
+    This is used for ``ros_arguments`` and ``arguments``. JSON may contain a list of strings or
+    ``null``. ``null`` is returned as Python ``None`` because the original ROS 2 type is optional.
+    """
+    if option_value is None:
+        return None
+
+    return _validate_string_list(action_key, option_name, option_value)
+
+
+def _validate_some_substitutions_type(action_key: str, option_name: str, option_value: object) -> Union[str, List[str]]:
+    """
+    Validate the JSON subset accepted for ROS 2 ``SomeSubstitutionsType``.
+
+    In ROS 2 Jazzy, the type is defined in:
+
+    ``/opt/ros/jazzy/lib/python3.12/site-packages/launch/some_substitutions_type.py``
+
+    The definition is:
+
+    .. code-block:: python
+
+        SomeSubstitutionsType = Union[
+            Text,
+            Path,
+            Substitution,
+            Iterable[Union[Text, Path, Substitution]],
+        ]
+
+    JSON cannot represent Python ``Path`` objects. JSON also cannot represent ROS 2 launch
+    ``Substitution`` objects, such as ``LaunchConfiguration`` or ``FindPackageShare``. This helper
+    therefore accepts only the part of that type that can be written naturally in JSON: a string or
+    a list of strings.
+
+    Users should normally write a single JSON string. For example, write ``"screen"`` instead of
+    ``["scr", "een"]``. The list form exists only because ROS 2 launch also accepts a list for
+    ``SomeSubstitutionsType``. In this helper, the list may contain only strings. When ROS 2 launch
+    resolves that list, it joins the strings into one final string. For example,
+    ``["scr", "een"]`` becomes ``"screen"``.
+    """
+    if isinstance(option_value, str):
+        return option_value
+
+    return _validate_string_list(action_key, option_name, option_value, expected_type='string or list of strings')
+
+
+def _validate_string(action_key: str, option_name: str, option_value: object) -> str:
+    """
+    Validate one string option.
+
+    This is used for fields such as ``output_format``. JSON must contain a string value.
+    """
+    if not isinstance(option_value, str):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be a string")
+
+    return option_value
+
+
+def _validate_string_list(
+    action_key: str, option_name: str, option_value: object, expected_type: str = 'list of strings'
+) -> List[str]:
+    """
+    Validate one list of strings.
+
+    This is used for options such as ``ros_arguments`` and ``arguments``. JSON must contain a list,
+    and every item in that list must be a string. ``expected_type`` is only used in the error
+    message when the value is not a list.
+    """
+    if not isinstance(option_value, list):
+        raise ValueError(f"launch action options '{option_name}' for key '{action_key}' must be a {expected_type}")
+
+    validated_items: List[str] = []
+
+    for index, item in enumerate(option_value):
+        if not isinstance(item, str):
+            raise ValueError(
+                f"launch action options '{option_name}' item {index} for key '{action_key}' must be a string"
+            )
+
+        validated_items.append(item)
+
+    return validated_items
