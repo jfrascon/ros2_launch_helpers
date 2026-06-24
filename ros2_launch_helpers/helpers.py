@@ -3,7 +3,7 @@ import math
 import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
@@ -419,8 +419,7 @@ def resolve_launch_action_arguments(
     """
     if default_arguments is None:
         default_arguments = {}
-
-    if not isinstance(default_arguments, dict):
+    elif not isinstance(default_arguments, dict):
         raise ValueError('default_arguments must be a dictionary')
 
     if str_json_arguments is None:
@@ -434,6 +433,7 @@ def resolve_launch_action_arguments(
     if not str_json_arguments:
         return dict(default_arguments)
 
+    # Transform from JSON to Python types.
     try:
         arguments = json.loads(str_json_arguments)
     except json.JSONDecodeError as e:
@@ -442,9 +442,55 @@ def resolve_launch_action_arguments(
     if not isinstance(arguments, dict):
         raise ValueError('launch_action_arguments_json_str must be a JSON object')
 
-    validated_arguments = _validate_launch_action_arguments(arguments)
+    # Validate each argument and convert to the types expected by launch actions.
+    resolved_arguments: Dict[str, Any] = {}
 
-    return {**default_arguments, **validated_arguments}
+    for argument_name, argument_value in arguments.items():
+        if not isinstance(argument_name, str) or not argument_name:
+            raise ValueError('launch action argument name must be a non-empty string')
+
+        # There are some parameters from launch_ros.actions.Node, launch.actions.ExecuteProcess,
+        # and launch.actions.ExecuteLocal that are not supported in the JSON input.
+        # These are rejected explicitly.
+        if argument_name in _REJECTED_LAUNCH_ACTION_ARGUMENTS:
+            raise ValueError(f"launch action argument '{argument_name}' must be written in the launch file")
+
+        match argument_name:
+            case 'name' | 'exec_name' | 'prefix' | 'cwd':
+                _validate_none_or_str_or_list_str(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case 'sigterm_timeout' | 'sigkill_timeout' | 'output':
+                _validate_str_or_list_str(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case 'ros_arguments' | 'arguments':
+                _validate_none_or_list_str(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case 'remappings':
+                _validate_none_or_list_list_str(argument_name, argument_value)
+                resolved_arguments[argument_name] = _to_remapping_tuples(
+                    cast(Optional[List[List[str]]], argument_value)
+                )
+            case 'env' | 'additional_env':
+                _validate_none_or_dict_str_str(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case 'shell' | 'emulate_tty' | 'cached_output' | 'log_cmd' | 'respawn':
+                _validate_bool(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case 'output_format':
+                _validate_str(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case 'respawn_delay':
+                _validate_none_or_int_or_float(argument_name, argument_value)
+                resolved_arguments[argument_name] = (
+                    None if argument_value is None else float(cast(Union[float, int], argument_value))
+                )
+            case 'respawn_max_retries':
+                _validate_int(argument_name, argument_value)
+                resolved_arguments[argument_name] = argument_value
+            case _:
+                raise ValueError(f"launch action argument '{argument_name}' is not supported")
+
+    return {**default_arguments, **resolved_arguments}
 
 
 def resolve_name(parent_namespace: str, child_name: str) -> str:
@@ -537,88 +583,67 @@ def _make_rendered_params_file_path() -> Path:
         return Path(temp_file.name)
 
 
-def _validate_bool(argument_name: str, argument_value: object) -> bool:
+def _to_remapping_tuples(argument_value: Optional[List[List[str]]]) -> Optional[List[Tuple[str, str]]]:
     """
-    Validate one JSON boolean argument.
+    Convert prevalidated remappings from JSON list pairs to Python tuple pairs.
 
-    This is used for arguments such as ``emulate_tty`` and ``respawn``. JSON must contain
-    ``true`` or ``false``. Strings such as ``"true"`` are rejected.
+    The caller must first call ``_validate_none_or_list_list_str``. This function only performs the
+    conversion needed by ``Node.remappings``: JSON cannot represent tuples, but ROS 2 launch accepts
+    remapping pairs as tuples.
+    """
+    if argument_value is None:
+        return None
+
+    return [(source, target) for source, target in argument_value]
+
+
+def _validate_bool(argument_name: str, argument_value: object) -> None:
+    """
+    Validate one boolean argument.
+
+    This is used for arguments such as ``emulate_tty`` and ``respawn``. The value must be ``True``
+    or ``False``. Strings such as ``"true"`` are rejected.
     """
     if not isinstance(argument_value, bool):
         raise ValueError(f"launch action argument '{argument_name}' must be a boolean")
 
-    return argument_value
 
-
-def _validate_int(argument_name: str, argument_value: object) -> int:
+def _validate_int(argument_name: str, argument_value: object) -> None:
     """
     Validate one integer argument.
 
-    This is used for ``respawn_max_retries``. JSON must contain an integer number. Booleans are
-    rejected even though Python treats ``bool`` as a subclass of ``int``.
+    This is used for ``respawn_max_retries``. Booleans are rejected even though Python treats
+    ``bool`` as a subclass of ``int``.
     """
-    # In Python a boolean is a subclass of an integer, therefore
-    # isinstance(True, int) return True, therefore, if we want to allow int value to be passed as a
-    # value for respawn_max_retries, we need to check if the value is a boolean first and reject it.
     if isinstance(argument_value, bool) or not isinstance(argument_value, int):
         raise ValueError(f"launch action argument '{argument_name}' must be an integer")
 
-    return argument_value
 
-
-def _validate_launch_action_arguments(arguments: Dict[str, object]) -> Dict[str, Any]:
+def _validate_list_str(argument_name: str, argument_value: object, expected_type: str = 'list of strings') -> None:
     """
-    Validate the arguments object for one launch action.
+    Validate list[str].
 
-    Continuing the example from ``resolve_launch_action_arguments``, this function checks each
-    field in the JSON object, rejects fields that must stay in the launch file, and converts
-    ``remappings`` from JSON lists into Python tuples.
+    This is used for arguments such as ``ros_arguments`` and ``arguments``. The value must be a
+    list, and every item in that list must be a string. ``expected_type`` is only used in the error
+    message when the value is not a list.
     """
-    validated_arguments: Dict[str, Any] = {}
+    if not isinstance(argument_value, list):
+        raise ValueError(f"launch action argument '{argument_name}' must be a {expected_type}")
 
-    for argument_name, argument_value in arguments.items():
-        if not isinstance(argument_name, str) or not argument_name:
-            raise ValueError('launch action argument name must be a non-empty string')
-
-        if argument_name in _REJECTED_LAUNCH_ACTION_ARGUMENTS:
-            raise ValueError(f"launch action argument '{argument_name}' must be written in the launch file")
-
-        match argument_name:
-            case 'name' | 'exec_name' | 'prefix' | 'cwd':
-                validated_arguments[argument_name] = _validate_optional_some_substitutions_type(
-                    argument_name, argument_value
-                )
-            case 'sigterm_timeout' | 'sigkill_timeout' | 'output':
-                validated_arguments[argument_name] = _validate_some_substitutions_type(argument_name, argument_value)
-            case 'ros_arguments' | 'arguments':
-                validated_arguments[argument_name] = _validate_optional_string_list(argument_name, argument_value)
-            case 'remappings':
-                validated_arguments[argument_name] = _validate_optional_remappings(argument_name, argument_value)
-            case 'env' | 'additional_env':
-                validated_arguments[argument_name] = _validate_optional_env_map(argument_name, argument_value)
-            case 'shell' | 'emulate_tty' | 'cached_output' | 'log_cmd' | 'respawn':
-                validated_arguments[argument_name] = _validate_bool(argument_name, argument_value)
-            case 'output_format':
-                validated_arguments[argument_name] = _validate_string(argument_name, argument_value)
-            case 'respawn_delay':
-                validated_arguments[argument_name] = _validate_optional_float(argument_name, argument_value)
-            case 'respawn_max_retries':
-                validated_arguments[argument_name] = _validate_int(argument_name, argument_value)
-            case _:
-                raise ValueError(f"launch action argument '{argument_name}' is not supported")
-
-    return validated_arguments
+    for index, item in enumerate(argument_value):
+        if not isinstance(item, str):
+            raise ValueError(f"launch action argument '{argument_name}' item {index} must be a string")
 
 
-def _validate_optional_env_map(argument_name: str, argument_value: object) -> Optional[Dict[str, str]]:
+def _validate_none_or_dict_str_str(argument_name: str, argument_value: object) -> None:
     """
-    Validate Optional[Dict[SomeSubstitutionsType, SomeSubstitutionsType]] = None.
+    Validate None | dict[str, str].
 
-    This is used for ``env`` and ``additional_env``. JSON may contain an object or ``null``.
-    ``null`` is returned as Python ``None`` because the original ROS 2 type is optional.
+    This is used for ``env`` and ``additional_env``. ``None`` is accepted because the original
+    ROS 2 type is optional.
     """
     if argument_value is None:
-        return None
+        return
 
     if not isinstance(argument_value, dict):
         raise ValueError(f"launch action argument '{argument_name}' must be a JSON object")
@@ -630,57 +655,38 @@ def _validate_optional_env_map(argument_name: str, argument_value: object) -> Op
         if not isinstance(env_value, str):
             raise ValueError(f"launch action argument '{argument_name}.{env_key}' must be a string")
 
-    return dict(argument_value)
 
-
-def _validate_optional_float(argument_name: str, argument_value: object) -> Optional[float]:
+def _validate_none_or_int_or_float(argument_name: str, argument_value: object) -> None:
     """
-    Validate Optional[float] = None.
+    Validate None | float.
 
-    This is used for ``respawn_delay``. JSON may contain a number or ``null``. Booleans are
-    rejected even though Python treats ``bool`` as a subclass of ``int``.
+    This is used for ``respawn_delay``. Integers are also accepted because they can be represented
+    as floats without changing the meaning. Booleans are rejected even though Python treats ``bool``
+    as a subclass of ``int``.
     """
     if argument_value is None:
-        return None
+        return
 
-    # In Python a boolean is a subclass of an integer, therefore
-    # isinstance(True, int) return True, therefore, if we want to allow int or float value to be
-    # passed as a value for respawn_delay, we need to check if the value is a boolean first and
-    # reject it.
     if isinstance(argument_value, bool) or not isinstance(argument_value, (float, int)):
         raise ValueError(f"launch action argument '{argument_name}' must be a number or null")
 
-    numeric_value = float(argument_value)
-
-    if not math.isfinite(numeric_value):
+    if not math.isfinite(float(argument_value)):
         raise ValueError(f"launch action argument '{argument_name}' must be finite")
 
-    return numeric_value
 
-
-def _validate_optional_remappings(argument_name: str, argument_value: object) -> Optional[List[Tuple[str, str]]]:
+def _validate_none_or_list_list_str(argument_name: str, argument_value: object) -> None:
     """
-    Validate Optional[SomeRemapRules] = None.
+    Validate None | list[list[str]] for ``remappings``.
 
-    JSON may contain a list of remapping pairs or ``null``. ``null`` is returned as Python
-    ``None`` because the original ROS 2 type is optional.
+    The value comes from ``json.loads``. JSON cannot represent tuples, so remapping pairs are
+    written as two-item lists. This function only validates that shape. The conversion to tuple
+    pairs happens later in ``_to_remapping_tuples``.
     """
     if argument_value is None:
-        return None
+        return
 
     if not isinstance(argument_value, list):
         raise ValueError(f"launch action argument '{argument_name}' must be a JSON list")
-
-    remappings: List[Tuple[str, str]] = []
-
-    # remappings: Optional[SomeRemapRules] = None,
-    # (type) SomeRemapRules = Iterable[Tuple[str | Path | Substitution | Iterable[str | Path |
-    # Substitution], str | Path | Substitution | Iterable[str | Path | Substitution]]]
-    # Basically a remapping is a list of tuples, where each tuple is a pair of strings.
-    # In json, we do not have tuples, so we use a list of lists instead.
-    # The list of lists is converted into a list of tuples in this function.
-    # Each inner list must have exactly two items, both of which must be non-empty strings.
-    # [[from1, to2], [from2, to2]] -> [(from1, to1), (from2, to2)]
 
     for index, remapping in enumerate(argument_value):
         if not isinstance(remapping, list) or len(remapping) != 2:
@@ -694,44 +700,48 @@ def _validate_optional_remappings(argument_name: str, argument_value: object) ->
         if not isinstance(new_name, str) or not new_name:
             raise ValueError(f"launch action argument 'remappings' item {index} must have a non-empty string target")
 
-        remappings.append((original_name, new_name))
 
-    return remappings
-
-
-def _validate_optional_some_substitutions_type(
-    argument_name: str, argument_value: object
-) -> Optional[Union[str, List[str]]]:
+def _validate_none_or_list_str(argument_name: str, argument_value: object) -> None:
     """
-    Validate Optional[SomeSubstitutionsType] = None.
+    Validate None | list[str].
 
-    JSON may contain a string, a list of strings, or ``null``. ``null`` is returned as Python
-    ``None`` because the original ROS 2 type is optional.
+    This is used for ``ros_arguments`` and ``arguments``. ``None`` is accepted because the original
+    ROS 2 type is optional.
     """
     if argument_value is None:
-        return None
+        return
 
-    return _validate_some_substitutions_type(argument_name, argument_value)
+    _validate_list_str(argument_name, argument_value)
 
 
-def _validate_optional_string_list(argument_name: str, argument_value: object) -> Optional[List[str]]:
+def _validate_none_or_str_or_list_str(argument_name: str, argument_value: object) -> None:
     """
-    Validate Optional[Iterable[SomeSubstitutionsType]] = None.
+    Validate None | str | list[str].
 
-    This is used for ``ros_arguments`` and ``arguments``. JSON may contain a list of strings or
-    ``null``. ``null`` is returned as Python ``None`` because the original ROS 2 type is optional.
+    This is used for optional ROS 2 ``SomeSubstitutionsType`` fields. ``None`` is accepted because
+    the original ROS 2 type is optional.
     """
     if argument_value is None:
-        return None
+        return
 
-    return _validate_string_list(argument_name, argument_value)
+    _validate_str_or_list_str(argument_name, argument_value)
 
 
-def _validate_some_substitutions_type(argument_name: str, argument_value: object) -> Union[str, List[str]]:
+def _validate_str(argument_name: str, argument_value: object) -> None:
     """
-    Validate the JSON subset accepted for ROS 2 ``SomeSubstitutionsType``.
+    Validate str.
 
-    In ROS 2 Jazzy, the type is defined in:
+    This is used for fields such as ``output_format``.
+    """
+    if not isinstance(argument_value, str):
+        raise ValueError(f"launch action argument '{argument_name}' must be a string")
+
+
+def _validate_str_or_list_str(argument_name: str, argument_value: object) -> None:
+    """
+    Validate str | list[str].
+
+    In ROS 2 Jazzy, ``SomeSubstitutionsType`` is defined in:
 
     ``/opt/ros/jazzy/lib/python3.12/site-packages/launch/some_substitutions_type.py``
 
@@ -746,54 +756,18 @@ def _validate_some_substitutions_type(argument_name: str, argument_value: object
             Iterable[Union[Text, Path, Substitution]],
         ]
 
-    JSON cannot represent Python ``Path`` objects. JSON also cannot represent ROS 2 launch
+    ``json.loads`` cannot produce Python ``Path`` objects. It also cannot produce ROS 2 launch
     ``Substitution`` objects, such as ``LaunchConfiguration`` or ``FindPackageShare``. This helper
-    therefore accepts only the part of that type that can be written naturally in JSON: a string or
-    a list of strings.
+    therefore accepts only the part of that type that can come from JSON: a string or a list of
+    strings.
 
-    Users should normally write a single JSON string. For example, write ``"screen"`` instead of
+    Users should normally write a single string. For example, write ``"screen"`` instead of
     ``["scr", "een"]``. The list form exists only because ROS 2 launch also accepts a list for
     ``SomeSubstitutionsType``. In this helper, the list may contain only strings. When ROS 2 launch
     resolves that list, it joins the strings into one final string. For example,
     ``["scr", "een"]`` becomes ``"screen"``.
     """
     if isinstance(argument_value, str):
-        return argument_value
+        return
 
-    return _validate_string_list(argument_name, argument_value, expected_type='string or list of strings')
-
-
-def _validate_string(argument_name: str, argument_value: object) -> str:
-    """
-    Validate one string argument.
-
-    This is used for fields such as ``output_format``. JSON must contain a string value.
-    """
-    if not isinstance(argument_value, str):
-        raise ValueError(f"launch action argument '{argument_name}' must be a string")
-
-    return argument_value
-
-
-def _validate_string_list(
-    argument_name: str, argument_value: object, expected_type: str = 'list of strings'
-) -> List[str]:
-    """
-    Validate one list of strings.
-
-    This is used for arguments such as ``ros_arguments`` and ``arguments``. JSON must contain a
-    list, and every item in that list must be a string. ``expected_type`` is only used in the error
-    message when the value is not a list.
-    """
-    if not isinstance(argument_value, list):
-        raise ValueError(f"launch action argument '{argument_name}' must be a {expected_type}")
-
-    validated_items: List[str] = []
-
-    for index, item in enumerate(argument_value):
-        if not isinstance(item, str):
-            raise ValueError(f"launch action argument '{argument_name}' item {index} must be a string")
-
-        validated_items.append(item)
-
-    return validated_items
+    _validate_list_str(argument_name, argument_value, expected_type='string or list of strings')
