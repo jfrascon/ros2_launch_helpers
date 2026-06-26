@@ -59,6 +59,7 @@ def test_resolve_launch_action_arguments_accepts_supported_node_fields():
     launch_action_arguments = _resolve(
         {
             'name': 'bridge',
+            'namespace': 'robot',
             'exec_name': 'bridge_process',
             'remappings': [['battery_state', 'state/battery']],
             'ros_arguments': ['--log-level', 'debug'],
@@ -68,11 +69,33 @@ def test_resolve_launch_action_arguments_accepts_supported_node_fields():
 
     assert launch_action_arguments == {
         'name': 'bridge',
+        'namespace': 'robot',
         'exec_name': 'bridge_process',
         'remappings': [('battery_state', 'state/battery')],
         'ros_arguments': ['--log-level', 'debug'],
         'arguments': ['--foo', 'bar'],
     }
+
+
+def test_resolve_remappings_accepts_none():
+    assert rlh.resolve_remappings('remappings', None) is None
+
+
+def test_resolve_remappings_converts_json_pairs_to_tuples():
+    assert rlh.resolve_remappings('remappings', [['battery_state', 'state/battery']]) == [
+        ('battery_state', 'state/battery')
+    ]
+
+
+def test_resolve_remappings_rejects_invalid_pairs():
+    with pytest.raises(ValueError, match='two-item list'):
+        rlh.resolve_remappings('custom_remappings', [['a']])
+
+    with pytest.raises(ValueError, match='source'):
+        rlh.resolve_remappings('custom_remappings', [['', 'b']])
+
+    with pytest.raises(ValueError, match='target'):
+        rlh.resolve_remappings('custom_remappings', [['a', '']])
 
 
 def test_resolve_launch_action_arguments_accepts_execute_process_fields():
@@ -189,11 +212,31 @@ def test_old_keyed_json_shape_is_rejected():
         _resolve({'bridge': {'output': 'screen'}})
 
 
-@pytest.mark.parametrize('field_name', ['package', 'executable', 'namespace', 'parameters', 'cmd'])
+@pytest.mark.parametrize('field_name', ['package', 'executable', 'parameters', 'cmd'])
 def test_resolve_launch_action_arguments_rejects_fields_that_belong_in_launch_file(field_name):
     with pytest.raises(ValueError, match='launch file'):
         _resolve({field_name: 'bad'})
 
+
+
+def test_resolve_launch_action_arguments_rejects_extra_rejected_arguments():
+    with pytest.raises(ValueError, match='respawn'):
+        rlh.resolve_launch_action_arguments('{"respawn": true}', extra_rejected_arguments={'respawn'})
+
+
+def test_resolve_launch_action_arguments_can_reject_namespace_as_extra_argument():
+    with pytest.raises(ValueError, match='namespace'):
+        rlh.resolve_launch_action_arguments('{"namespace": "robot"}', extra_rejected_arguments={'namespace'})
+
+
+def test_resolve_launch_action_arguments_rejects_unknown_extra_rejected_arguments():
+    with pytest.raises(ValueError, match='not known'):
+        rlh.resolve_launch_action_arguments('{}', extra_rejected_arguments={'not_a_launch_action_argument'})
+
+
+def test_resolve_launch_action_arguments_rejects_non_set_extra_rejected_arguments():
+    with pytest.raises(ValueError, match='extra_rejected_arguments must be a set'):
+        rlh.resolve_launch_action_arguments('{}', extra_rejected_arguments=['respawn'])
 
 def test_resolve_launch_action_arguments_rejects_unknown_fields():
     with pytest.raises(ValueError, match='not supported'):
@@ -224,7 +267,7 @@ def test_string_list_fields_reject_non_string_items(field_name):
         _resolve({field_name: [1]})
 
 
-@pytest.mark.parametrize('field_name', ['name', 'exec_name', 'prefix', 'cwd', 'sigterm_timeout', 'output'])
+@pytest.mark.parametrize('field_name', ['name', 'namespace', 'exec_name', 'prefix', 'cwd', 'sigterm_timeout', 'output'])
 def test_some_substitutions_type_fields_reject_non_strings_and_non_lists(field_name):
     with pytest.raises(ValueError, match='string or list of strings'):
         _resolve({field_name: 1})

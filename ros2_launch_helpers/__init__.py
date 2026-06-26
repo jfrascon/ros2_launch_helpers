@@ -20,6 +20,7 @@ from .helpers import (
     resolve_file,
     resolve_launch_action_arguments,
     resolve_name,
+    resolve_remappings,
     to_log_info_actions,
     to_prefix,
 )
@@ -48,6 +49,7 @@ __all__ = [
     'render_params_file',
     'resolve_file',
     'resolve_launch_action_arguments',
+    'resolve_remappings',
     'resolve_name',
     'to_prefix',
     'to_log_info_actions',

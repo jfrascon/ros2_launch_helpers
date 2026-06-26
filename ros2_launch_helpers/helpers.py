@@ -16,72 +16,168 @@ LAUNCH_ACTION_ARGUMENTS_DESC = (
     'launch.actions.ExecuteProcess, or launch.actions.ExecuteLocal action.'
 )
 
-_REJECTED_LAUNCH_ACTION_ARGUMENTS = {
-    'package',
+_ALL_LAUNCH_ACTION_ARGUMENTS = {
+    # From Node.
     'executable',
+    'package',
+    'name',
     'namespace',
+    'exec_name',
     'parameters',
+    'remappings',
+    'ros_arguments',
+    'arguments',
+    # From ExecuteProcess.
     'cmd',
+    'prefix',
+    'cwd',
+    'env',
+    'additional_env',
+    # From ExecuteLocal.
+    'process_description',
+    'shell',
+    'sigterm_timeout',
+    'sigkill_timeout',
+    'emulate_tty',
+    'output',
+    'output_format',
+    'cached_output',
+    'log_cmd',
+    'on_exit',
+    'respawn',
+    'respawn_delay',
+    'respawn_max_retries',
+    # From Action.
+    'condition',
+}
+
+_REJECTED_LAUNCH_ACTION_ARGUMENTS = {
+    # From Node.
+    'executable',
+    'package',
+    'parameters',
+    # From ExecuteProcess.
+    'cmd',
+    # From ExecuteLocal.
     'process_description',
     'on_exit',
+    # From Action.
     'condition',
 }
 
 
 class FileResolutionError(ValueError):
     """
-    Base exception for failures while converting a file path or URI into a filesystem path.
+    Base exception raised when this module cannot convert a user-provided file value into a
+    filesystem path.
+
+    Callers can catch this class when they do not need to distinguish between an empty value, an
+    invalid URI shape, or another file-resolution error reported by this module.
     """
 
 
 class NullFilePathError(FileResolutionError):
     """
-    Raised when a file path or URI is required but the provided value is empty.
+    Raised when a function needs a file path or URI, but the caller passed ``None`` or an empty
+    string.
     """
 
 
 class InvalidFileUriPatternError(FileResolutionError):
     """
-    Raised when a file URI does not follow one of the URI formats accepted by ``resolve_file``.
+    Raised when a URI-like file value is not one of the formats accepted by ``resolve_file``.
+
+    This includes malformed ``package://`` values, malformed ``file://`` values, and unsupported
+    URI schemes such as ``http://``.
     """
 
 
 def compute_global_namespace(namespace: str) -> str:
     """
-    Resolve one launch namespace argument as an absolute namespace.
+    Return the global namespace that should be stored in the launch context.
 
-    This helper contains only the namespace rule. Launch actions are responsible for reading the
-    input value from the launch context and writing the result back to the launch context.
+    ``namespace`` is the namespace value provided by the user. It can be empty, relative, absolute,
+    or ``/``. The returned value is resolved from the root namespace, so a relative value such as
+    ``robots`` becomes ``/robots``.
+
+    This function only applies the naming rule. The launch action that calls it is responsible for
+    reading ``namespace`` from the launch context and writing the resolved value back.
     """
     return resolve_name('/', namespace)
 
 
 def compute_robot_namespace(namespace: str, robot_name: str) -> str:
     """
-    Resolve one robot name inside a parent namespace.
+    Return the namespace for one robot inside a parent namespace.
 
-    This helper keeps the naming rule independent from ROS launch runtime concerns.
+    ``namespace`` is the parent namespace and ``robot_name`` is the child name that identifies the
+    robot. If ``namespace`` is ``/fleet`` and ``robot_name`` is ``mima``, the returned namespace is
+    ``/fleet/mima``.
+
+    This function only applies the naming rule. It does not read or write launch configurations.
     """
     return resolve_name(namespace, robot_name)
 
 
 def compute_robot_prefix(robot_name: str) -> str:
     """
-    Convert one robot name into the prefix used for frame and topic names.
+    Return the prefix derived from one robot name.
+
+    The prefix is used by callers that need a stable text prefix for frame names, topic names, or
+    other generated identifiers. If ``robot_name`` already ends with ``_``, it is returned as-is.
+    Otherwise, one trailing ``_`` is added.
     """
     return to_prefix(robot_name)
 
 
 def default_launch_action_arguments_json_str() -> str:
+    """
+    Return the default JSON value for a launch action arguments launch argument.
+
+    The default is the empty JSON object, ``{}``. Passing this value to
+    ``resolve_launch_action_arguments`` means that no action-specific arguments are overridden by
+    the user.
+    """
     return '{}'
+
+
+def resolve_remappings(argument_name: str, argument_value: object) -> Optional[List[Tuple[str, str]]]:
+    """
+    Convert remappings read from JSON into the format expected by ROS 2 launch actions.
+
+    A ROS 2 launch action expects each remapping as a tuple: ``("from", "to")``.
+    A JSON string cannot contain Python tuples, so launch arguments must write each
+    remapping as a two-item list: ``["from", "to"]``.
+
+    For example, this JSON value:
+
+    .. code-block:: json
+
+        [["~/reference", "cmd_vel"], ["~/odometry", "odom"]]
+
+    is returned as:
+
+    .. code-block:: python
+
+        [("~/reference", "cmd_vel"), ("~/odometry", "odom")]
+
+    The function also checks that every remapping has exactly two non-empty string
+    values. Code outside this module should call this public function instead of
+    calling the private helper used by ``resolve_launch_action_arguments``.
+    """
+    return _resolve_argument_remappings(argument_name, argument_value)
 
 
 def flatten_namespace(namespace: str, new_sep: str) -> str:
     """
-    Flatten a namespace into a non-hierarchical string.
+    Convert a ROS namespace into one flat string.
 
-    The leading and trailing '/' are removed before replacing inner '/' separators with `new_sep`.
-    This means the root namespace '/' and the empty namespace '' are both represented as ''.
+    ``namespace`` must be a valid ROS namespace. The leading and trailing ``/`` characters are
+    removed before the inner ``/`` separators are replaced with ``new_sep``.
+
+    For example, ``/fleet/robot1`` with ``new_sep="_"`` returns ``fleet_robot1``.
+    The root namespace ``/`` and the empty namespace ``''`` both return ``''`` because they do not
+    contain a concrete namespace segment.
     """
     if not isinstance(namespace, str):
         raise ValueError('Namespace must be a string')
@@ -97,11 +193,14 @@ def flatten_namespace(namespace: str, new_sep: str) -> str:
 
 def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
     """
-    Build the parameters field with a base parameter file and optional files overlaying it.
-    :param params_file: Path to the base YAML file with ros__parameters (required).
-    :param overlay_params_file_list: Comma-separated list of YAML files to overlay (optional,
-        default: '').
-    :return: List of ParameterFile objects to be passed to the 'parameters' field of a Node.
+    Build the ``parameters`` list for a ROS 2 launch ``Node``.
+
+    ``params_file`` is the required base YAML file. ``overlay_params_file_list`` is an optional
+    comma-separated list of extra YAML files. Empty overlay entries, duplicate overlay entries, and
+    an overlay equal to ``params_file`` are ignored.
+
+    Each returned item is a ``ParameterFile`` with substitutions enabled. The returned list can be
+    passed directly to the ``parameters`` field of a ``Node``.
     """
     params_file = params_file.strip()
 
@@ -131,16 +230,14 @@ def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list
 
 def is_valid_name(s: str) -> bool:
     """
-    Validate characters of a string segment.
+    Return whether one name segment is valid for this helper module.
 
-    Returns:
-        - True  -> all characters are valid (ASCII alnum or underscore) and length is valid.
-        - False -> at least one invalid character found.
+    A valid segment is a non-empty string with at most 255 characters. It must not start with a
+    number, and every character must be ASCII alphanumeric or ``_``.
 
-    Notes:
-        - Rules match ROS 2 node name validation (Humble):
-          https://github.com/ros2/rmw/blob/humble/rmw/src/validate_node_name.c
-          https://github.com/ros2/rclpy/blob/humble/rclpy/src/rclpy/names.cpp
+    The rule intentionally matches the ROS 2 node-name validation style used by this package. The
+    function returns ``False`` instead of raising because callers often use it inside validation
+    paths that build their own error message.
     """
     if not isinstance(s, str):
         return False
@@ -164,12 +261,13 @@ def is_valid_name(s: str) -> bool:
 
 def is_valid_namespace(ns: str) -> bool:
     """
-    Validate a namespace string.
+    Return whether one namespace string is valid for this helper module.
 
-    Rules:
-    - '' and '/' are permitted as special cases (root/empty).
-    - Reject empty segments (no '//' allowed at any position).
-    - Each non-empty segment must be valid, i.e., ASCII alnum or underscore only, [A-Za-z0-9_].
+    The empty namespace ``''`` and the root namespace ``/`` are valid special cases. Other
+    namespaces may be relative, such as ``robot1``, or absolute, such as ``/fleet/robot1``.
+
+    Each non-empty segment must pass ``is_valid_name``. Repeated separators are rejected, so
+    ``/fleet//robot1`` is invalid.
     """
     if not isinstance(ns, str):
         return False
@@ -221,20 +319,15 @@ def is_valid_namespace(ns: str) -> bool:
 
 def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
     """
-    Read and parse a YAML file, returning both the resolved path and the loaded object.
+    Resolve, read, and parse one YAML file.
 
-    :param yaml_file: Path or URI (package://, file://, or regular path) to the YAML file.
-    :return: Tuple ``(resolved_path, data)`` where ``data`` is the parsed YAML object; it can be
-        ``None`` when the file contains only comments/whitespace.
-    :raises NullFilePathError: If no YAML file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI
-        formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package
-        index.
-    :raises FileNotFoundError: If the resolved path does not point to a file.
-    :raises yaml.YAMLError: If the YAML syntax is invalid.
-    :raises OSError: If the file cannot be read.
-    :raises UnicodeDecodeError: If the file is not valid UTF-8.
+    ``yaml_file`` can be a regular path, a ``file://`` URI, or a ``package://`` URI accepted by
+    ``resolve_file``. The returned tuple contains the resolved filesystem path and the Python value
+    returned by ``yaml.safe_load``.
+
+    If the YAML file only contains comments or whitespace, the parsed value is ``None``. The
+    function raises if the path cannot be resolved, the resolved path is not a file, the file cannot
+    be read as UTF-8, or the YAML content is invalid.
     """
     resolved_yaml_file = resolve_file(yaml_file)
     resolved_yaml_path = Path(resolved_yaml_file)
@@ -250,26 +343,17 @@ def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
 
 def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str:
     """
-    Render one ROS parameter YAML file.
+    Expand launch substitutions in one ROS parameter YAML file and return a stable copy.
 
-    `params_file` must be a resolved filesystem path.
+    ``params_file`` must already be a filesystem path. This function does not resolve
+    ``package://`` or ``file://`` values.
 
-    `ParameterFile.evaluate()` uses the launch_ros YAML substitution engine. With
-    `allow_substs=True`, it expands expressions such as `$(var robot_name)` using the current
-    launch context and returns the path to a temporary expanded YAML file.
+    ``ParameterFile.evaluate()`` expands expressions such as ``$(var robot_name)`` using the
+    provided launch context. The path returned by ``ParameterFile.evaluate()`` belongs to
+    ``ParameterFile`` and is deleted when ``cleanup()`` runs, so this helper copies the rendered
+    YAML into a new temporary file before cleaning up.
 
-    This function copies the temporary expanded YAML to a new temporary file because
-    `ParameterFile.cleanup()` deletes the file returned by `ParameterFile.evaluate()`.
-
-    :param params_file: Resolved filesystem path to the ROS parameter YAML file.
-    :param ctx: Launch context used to evaluate substitutions in the parameter YAML file.
-    :return: Filesystem path to the rendered YAML file.
-    :raises FileNotFoundError: If the resolved params file path does not point to a file.
-    :raises OSError: If the output directory cannot be created, or if the temporary or output file
-        cannot be read or written.
-    :raises UnicodeDecodeError: If the evaluated temporary YAML file is not valid UTF-8.
-    :raises Exception: If ``launch_ros.parameter_descriptions.ParameterFile.evaluate`` fails while
-        expanding substitutions.
+    The returned string is the path to the stable temporary copy. The caller owns that file.
     """
     params_file = Path(params_file)
 
@@ -291,11 +375,14 @@ def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str
 
 def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
     """
-    Replace each '/' separator in a namespace with `new_sep`.
+    Replace every ``/`` character in a valid namespace with another single character.
 
-    This function performs the replacement on the namespace string itself. It does not remove a
-    leading '/' or a trailing '/'. For example, '/' becomes `new_sep`, and '/ns1/ns2/' becomes
-    '<new_sep>ns1<new_sep>ns2<new_sep>'.
+    ``namespace`` must be valid according to ``is_valid_namespace``. ``new_sep`` must be a
+    one-character string.
+
+    This function does not remove leading or trailing ``/`` characters. For example,
+    ``/ns1/ns2/`` with ``new_sep="_"`` returns ``_ns1_ns2_``. Use ``flatten_namespace`` when the
+    leading and trailing separators must be removed before replacement.
     """
     if not isinstance(namespace, str):
         raise ValueError('Namespace must be a string')
@@ -311,18 +398,17 @@ def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
 
 def resolve_file(file: Optional[Union[str, Path]]) -> str:
     """
-    Resolve one regular path, ``file://`` URI, or ``package://`` URI to a filesystem path.
+    Convert one file value into a filesystem path string.
 
-    Regular paths are returned after ``~`` expansion. The path does not have to exist; callers that
-    need an existing file should check that separately after resolution.
+    ``file`` can be a regular path, an absolute ``file://`` URI, or a
+    ``package://<package>/<relative-path>`` URI. Regular paths and ``file://`` paths are returned
+    after user-home expansion.
 
-    :param file: Regular path, ``file://`` URI, or ``package://<package>/<path>`` URI.
-    :return: Resolved filesystem path.
-    :raises NullFilePathError: If no file path or URI is provided.
-    :raises InvalidFileUriPatternError: If a URI does not follow one of the supported file URI
-        formats.
-    :raises PackageNotFoundError: If the package in a ``package://`` URI is not in the ROS package
-        index.
+    The returned path is not required to exist. Callers that need an existing file must check that
+    separately.
+
+    ``package://`` paths are resolved inside the package share directory. A package URI that tries
+    to escape that directory is rejected.
     """
     if file is None:
         raise NullFilePathError('File path or URI not provided')
@@ -376,20 +462,37 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
 
 
 def resolve_launch_action_arguments(
-    str_json_arguments: Optional[str], default_arguments: Optional[Dict[str, Any]] = None
+    str_json_arguments: Optional[str],
+    default_arguments: Optional[Dict[str, Any]] = None,
+    extra_rejected_arguments: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Parse one JSON object with arguments for one launch action.
+    Convert one JSON object into keyword arguments for one launch action.
 
-    The JSON root must be an object whose fields are supported arguments from ``Node``,
-    ``ExecuteProcess``, or ``ExecuteLocal``. The returned dictionary can be passed to one launch
-    action with ``**arguments``.
+    ``str_json_arguments`` is the string value normally received from a launch argument. It must be
+    empty or a JSON object. Each key is the name of one supported keyword argument from
+    ``launch_ros.actions.Node``, ``launch.actions.ExecuteProcess``, or
+    ``launch.actions.ExecuteLocal``.
 
-    ``default_arguments`` is merged before the JSON object. The launch file owns those default
-    arguments because it knows which action is being created. JSON values override default
-    arguments, including ``null`` values.
+    ``default_arguments`` contains the values chosen by the launch file. User-provided JSON values
+    are merged on top of those defaults. If the JSON explicitly sets a key to ``null``, the returned
+    dictionary keeps that ``None`` value instead of falling back to the default.
 
-    Example input:
+    ``extra_rejected_arguments`` contains extra known launch action arguments that this caller does not
+    allow for this specific action. Every value in ``extra_rejected_arguments`` must be a known launch
+    action argument. Unknown rejected arguments are treated as a launch-file programming error.
+
+    The returned dictionary can be passed directly to one launch action:
+
+    .. code-block:: python
+
+        Node(..., **resolve_launch_action_arguments(raw_json, defaults))
+
+    Some launch action fields are intentionally rejected because they define the action itself, not
+    user-overridable runtime options. For example, ``package``, ``executable``, ``parameters``, and
+    ``condition`` must be written in the launch file.
+
+    Example JSON input:
 
     .. code-block:: json
 
@@ -403,7 +506,7 @@ def resolve_launch_action_arguments(
           ]
         }
 
-    The returned value for the example above is:
+    Returned value for that JSON input:
 
     .. code-block:: python
 
@@ -421,6 +524,20 @@ def resolve_launch_action_arguments(
         default_arguments = {}
     elif not isinstance(default_arguments, dict):
         raise ValueError('default_arguments must be a dictionary')
+
+    if extra_rejected_arguments is None:
+        extra_rejected_arguments = set()
+    elif not isinstance(extra_rejected_arguments, set):
+        raise ValueError('extra_rejected_arguments must be a set')
+
+    total_rejected_arguments = _REJECTED_LAUNCH_ACTION_ARGUMENTS | extra_rejected_arguments
+    unknown_rejected_arguments = total_rejected_arguments - _ALL_LAUNCH_ACTION_ARGUMENTS
+
+    if unknown_rejected_arguments:
+        raise ValueError(
+            'rejected launch action arguments are not known: '
+            f'{sorted(unknown_rejected_arguments)}'
+        )
 
     if str_json_arguments is None:
         return dict(default_arguments)
@@ -449,44 +566,41 @@ def resolve_launch_action_arguments(
         if not isinstance(argument_name, str) or not argument_name:
             raise ValueError('launch action argument name must be a non-empty string')
 
-        # There are some parameters from launch_ros.actions.Node, launch.actions.ExecuteProcess,
-        # and launch.actions.ExecuteLocal that are not supported in the JSON input.
-        # These are rejected explicitly.
-        if argument_name in _REJECTED_LAUNCH_ACTION_ARGUMENTS:
-            raise ValueError(f"launch action argument '{argument_name}' must be written in the launch file")
+        if argument_name not in _ALL_LAUNCH_ACTION_ARGUMENTS:
+            raise ValueError(f"launch action argument '{argument_name}' is not supported")
+
+        # Some known parameters from launch_ros.actions.Node, launch.actions.ExecuteProcess,
+        # and launch.actions.ExecuteLocal are rejected globally or by this caller.
+        if argument_name in total_rejected_arguments:
+            raise ValueError(
+                f"launch action argument '{argument_name}' is not allowed; set it directly in the launch file"
+            )
 
         match argument_name:
-            case 'name' | 'exec_name' | 'prefix' | 'cwd':
-                _validate_none_or_str_or_list_str(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
+            case 'name' | 'namespace' | 'exec_name' | 'prefix' | 'cwd':
+                resolved_arguments[argument_name] = _resolve_argument_optional_substitution(
+                    argument_name, argument_value
+                )
             case 'sigterm_timeout' | 'sigkill_timeout' | 'output':
-                _validate_str_or_list_str(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
+                resolved_arguments[argument_name] = _resolve_argument_substitution(argument_name, argument_value)
             case 'ros_arguments' | 'arguments':
-                _validate_none_or_list_str(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
+                resolved_arguments[argument_name] = _resolve_argument_optional_string_list(
+                    argument_name, argument_value
+                )
             case 'remappings':
-                _validate_none_or_list_list_str(argument_name, argument_value)
-                resolved_arguments[argument_name] = _to_remapping_tuples(
-                    cast(Optional[List[List[str]]], argument_value)
-                )
+                resolved_arguments[argument_name] = _resolve_argument_remappings(argument_name, argument_value)
             case 'env' | 'additional_env':
-                _validate_none_or_dict_str_str(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
-            case 'shell' | 'emulate_tty' | 'cached_output' | 'log_cmd' | 'respawn':
-                _validate_bool(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
-            case 'output_format':
-                _validate_str(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
-            case 'respawn_delay':
-                _validate_none_or_int_or_float(argument_name, argument_value)
-                resolved_arguments[argument_name] = (
-                    None if argument_value is None else float(cast(Union[float, int], argument_value))
+                resolved_arguments[argument_name] = _resolve_argument_optional_string_dict(
+                    argument_name, argument_value
                 )
+            case 'shell' | 'emulate_tty' | 'cached_output' | 'log_cmd' | 'respawn':
+                resolved_arguments[argument_name] = _resolve_argument_bool(argument_name, argument_value)
+            case 'output_format':
+                resolved_arguments[argument_name] = _resolve_argument_str(argument_name, argument_value)
+            case 'respawn_delay':
+                resolved_arguments[argument_name] = _resolve_argument_optional_float(argument_name, argument_value)
             case 'respawn_max_retries':
-                _validate_int(argument_name, argument_value)
-                resolved_arguments[argument_name] = argument_value
+                resolved_arguments[argument_name] = _resolve_argument_int(argument_name, argument_value)
             case _:
                 raise ValueError(f"launch action argument '{argument_name}' is not supported")
 
@@ -495,18 +609,17 @@ def resolve_launch_action_arguments(
 
 def resolve_name(parent_namespace: str, child_name: str) -> str:
     """
-    Resolve `child_name` with respect to `parent_namespace`.
+    Resolve one child namespace against one parent namespace.
 
-    `child_name` can be a single relative name segment such as `robot`, a relative namespace
-    expression such as `ns1/ns2`, an absolute namespace expression such as `/ns1/ns2`, or an empty
-    string.
+    ``parent_namespace`` and ``child_name`` must both be valid namespaces according to
+    ``is_valid_namespace``. ``child_name`` can be empty, relative, absolute, or ``/``.
 
-    If `child_name` is relative, append it to `parent_namespace`.
-    If `child_name` is absolute, return `child_name` and ignore `parent_namespace`.
-    If `child_name` is empty, return `parent_namespace`.
+    If ``child_name`` is relative, it is appended under ``parent_namespace``. If ``child_name`` is
+    absolute, it is returned as the result and ``parent_namespace`` is ignored. If ``child_name`` is
+    empty, the normalized ``parent_namespace`` is returned.
 
-    Both inputs must be valid namespace strings. This function does not collapse repeated `/`; it
-    rejects invalid namespaces instead.
+    The function removes trailing separators where needed, but it does not collapse invalid
+    repeated separators such as ``//``. Invalid inputs raise ``ValueError``.
     """
     if not isinstance(parent_namespace, str) or not isinstance(child_name, str):
         raise ValueError('Arguments must be strings')
@@ -542,9 +655,10 @@ def resolve_name(parent_namespace: str, child_name: str) -> str:
 
 def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
     """
-    Convert a list of text messages into launch LogInfo entities.
+    Convert text messages into ``LogInfo`` launch entities.
 
-    Empty messages are ignored.
+    Each non-empty string in ``messages`` becomes one ``LogInfo`` action. Empty strings are ignored.
+    If ``messages`` is empty, the function returns an empty list.
     """
     if not messages:
         return []
@@ -559,6 +673,15 @@ def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
 
 
 def to_prefix(name: str) -> str:
+    """
+    Convert one valid name into a prefix string.
+
+    ``name`` must be a valid name according to ``is_valid_name``. If it already ends with ``_``, it
+    is returned unchanged. Otherwise, the returned prefix is ``name`` plus one trailing ``_``.
+
+    This helper is used when a caller wants names such as ``robot`` to become stable prefixes such
+    as ``robot_`` without adding a second underscore to names that already have one.
+    """
     if not isinstance(name, str):
         raise ValueError('name must be a string to create a prefix')
 
@@ -574,58 +697,51 @@ def to_prefix(name: str) -> str:
 
 def _make_rendered_params_file_path() -> Path:
     """
-    Create a unique temporary YAML path for rendered ROS params.
+    Create a temporary YAML file path for rendered ROS parameters.
 
-    The file is created immediately so concurrent launches cannot choose the same path. The caller
-    can overwrite it with the rendered YAML content.
+    The file is created immediately, so concurrent launch processes cannot choose the same path.
+    The caller receives the path and can overwrite the file with the rendered YAML content.
     """
     with NamedTemporaryFile(prefix='robot_params_', suffix='.yaml', delete=False) as temp_file:
         return Path(temp_file.name)
 
 
-def _to_remapping_tuples(argument_value: Optional[List[List[str]]]) -> Optional[List[Tuple[str, str]]]:
+def _resolve_argument_bool(argument_name: str, argument_value: object) -> bool:
     """
-    Convert prevalidated remappings from JSON list pairs to Python tuple pairs.
+    Return one launch action argument as a Python boolean.
 
-    The caller must first call ``_validate_none_or_list_list_str``. This function only performs the
-    conversion needed by ``Node.remappings``: JSON cannot represent tuples, but ROS 2 launch accepts
-    remapping pairs as tuples.
-    """
-    if argument_value is None:
-        return None
-
-    return [(source, target) for source, target in argument_value]
-
-
-def _validate_bool(argument_name: str, argument_value: object) -> None:
-    """
-    Validate one boolean argument.
-
-    This is used for arguments such as ``emulate_tty`` and ``respawn``. The value must be ``True``
-    or ``False``. Strings such as ``"true"`` are rejected.
+    The input value normally comes from ``json.loads``. It must already be a JSON boolean, which
+    becomes ``True`` or ``False`` in Python. Strings such as ``"true"`` are rejected because ROS 2
+    launch expects a real boolean for these fields.
     """
     if not isinstance(argument_value, bool):
         raise ValueError(f"launch action argument '{argument_name}' must be a boolean")
 
+    return argument_value
 
-def _validate_int(argument_name: str, argument_value: object) -> None:
+
+def _resolve_argument_int(argument_name: str, argument_value: object) -> int:
     """
-    Validate one integer argument.
+    Return one launch action argument as a Python integer.
 
-    This is used for ``respawn_max_retries``. Booleans are rejected even though Python treats
-    ``bool`` as a subclass of ``int``.
+    This is used for fields such as ``respawn_max_retries``. Booleans are rejected even though
+    Python treats ``bool`` as a subclass of ``int``.
     """
     if isinstance(argument_value, bool) or not isinstance(argument_value, int):
         raise ValueError(f"launch action argument '{argument_name}' must be an integer")
 
+    return argument_value
 
-def _validate_list_str(argument_name: str, argument_value: object, expected_type: str = 'list of strings') -> None:
+
+def _resolve_argument_string_list(
+    argument_name: str, argument_value: object, expected_type: str = 'list of strings'
+) -> List[str]:
     """
-    Validate list[str].
+    Return one launch action argument as a list of strings.
 
-    This is used for arguments such as ``ros_arguments`` and ``arguments``. The value must be a
-    list, and every item in that list must be a string. ``expected_type`` is only used in the error
-    message when the value is not a list.
+    The value normally comes from a JSON array. The array itself must be a list, and every item in
+    it must be a string. ``expected_type`` is only used to make the error message match the field
+    being resolved.
     """
     if not isinstance(argument_value, list):
         raise ValueError(f"launch action argument '{argument_name}' must be a {expected_type}")
@@ -634,16 +750,19 @@ def _validate_list_str(argument_name: str, argument_value: object, expected_type
         if not isinstance(item, str):
             raise ValueError(f"launch action argument '{argument_name}' item {index} must be a string")
 
+    return cast(List[str], argument_value)
 
-def _validate_none_or_dict_str_str(argument_name: str, argument_value: object) -> None:
+
+def _resolve_argument_optional_string_dict(argument_name: str, argument_value: object) -> Optional[Dict[str, str]]:
     """
-    Validate None | dict[str, str].
+    Return one launch action argument as ``None`` or ``dict[str, str]``.
 
-    This is used for ``env`` and ``additional_env``. ``None`` is accepted because the original
-    ROS 2 type is optional.
+    This is used for fields such as ``env`` and ``additional_env``. ``None`` is accepted because
+    those launch action fields are optional. When a dictionary is provided, every key must be a
+    non-empty string and every value must be a string.
     """
     if argument_value is None:
-        return
+        return None
 
     if not isinstance(argument_value, dict):
         raise ValueError(f"launch action argument '{argument_name}' must be a JSON object")
@@ -655,17 +774,19 @@ def _validate_none_or_dict_str_str(argument_name: str, argument_value: object) -
         if not isinstance(env_value, str):
             raise ValueError(f"launch action argument '{argument_name}.{env_key}' must be a string")
 
+    return cast(Dict[str, str], argument_value)
 
-def _validate_none_or_int_or_float(argument_name: str, argument_value: object) -> None:
+
+def _resolve_argument_optional_float(argument_name: str, argument_value: object) -> Optional[float]:
     """
-    Validate None | float.
+    Return one launch action argument as ``None`` or a finite Python float.
 
-    This is used for ``respawn_delay``. Integers are also accepted because they can be represented
-    as floats without changing the meaning. Booleans are rejected even though Python treats ``bool``
-    as a subclass of ``int``.
+    This is used for fields such as ``respawn_delay``. JSON integers are accepted and converted to
+    floats because that does not change the meaning of the value. Booleans are rejected even though
+    Python treats ``bool`` as a subclass of ``int``.
     """
     if argument_value is None:
-        return
+        return None
 
     if isinstance(argument_value, bool) or not isinstance(argument_value, (float, int)):
         raise ValueError(f"launch action argument '{argument_name}' must be a number or null")
@@ -673,75 +794,96 @@ def _validate_none_or_int_or_float(argument_name: str, argument_value: object) -
     if not math.isfinite(float(argument_value)):
         raise ValueError(f"launch action argument '{argument_name}' must be finite")
 
+    return float(argument_value)
 
-def _validate_none_or_list_list_str(argument_name: str, argument_value: object) -> None:
+
+def _resolve_argument_remappings(argument_name: str, argument_value: object) -> Optional[List[Tuple[str, str]]]:
     """
-    Validate None | list[list[str]] for ``remappings``.
+    Return one remappings argument as ``None`` or a list of tuple pairs.
 
-    The value comes from ``json.loads``. JSON cannot represent tuples, so remapping pairs are
-    written as two-item lists. This function only validates that shape. The conversion to tuple
-    pairs happens later in ``_to_remapping_tuples``.
+    JSON cannot contain Python tuples, so callers write each remapping as a two-item list:
+    ``["from", "to"]``. ROS 2 launch actions expect tuple pairs, so this helper converts each valid
+    pair to ``("from", "to")``.
+
+    Each pair must contain exactly two non-empty strings. ``None`` is accepted because the
+    ``remappings`` launch action field is optional.
     """
     if argument_value is None:
-        return
+        return None
 
     if not isinstance(argument_value, list):
         raise ValueError(f"launch action argument '{argument_name}' must be a JSON list")
 
+    remappings: List[Tuple[str, str]] = []
+
     for index, remapping in enumerate(argument_value):
         if not isinstance(remapping, list) or len(remapping) != 2:
-            raise ValueError(f"launch action argument 'remappings' item {index} must be a two-item list")
+            raise ValueError(f"launch action argument '{argument_name}' item {index} must be a two-item list")
 
         original_name, new_name = remapping
 
         if not isinstance(original_name, str) or not original_name:
-            raise ValueError(f"launch action argument 'remappings' item {index} must have a non-empty string source")
+            raise ValueError(
+                f"launch action argument '{argument_name}' item {index} must have a non-empty string source"
+            )
 
         if not isinstance(new_name, str) or not new_name:
-            raise ValueError(f"launch action argument 'remappings' item {index} must have a non-empty string target")
+            raise ValueError(
+                f"launch action argument '{argument_name}' item {index} must have a non-empty string target"
+            )
+
+        remappings.append((original_name, new_name))
+
+    return remappings
 
 
-def _validate_none_or_list_str(argument_name: str, argument_value: object) -> None:
+def _resolve_argument_optional_string_list(argument_name: str, argument_value: object) -> Optional[List[str]]:
     """
-    Validate None | list[str].
+    Return one launch action argument as ``None`` or ``list[str]``.
 
-    This is used for ``ros_arguments`` and ``arguments``. ``None`` is accepted because the original
-    ROS 2 type is optional.
+    This is used for fields such as ``ros_arguments`` and ``arguments``. ``None`` is accepted
+    because those launch action fields are optional. Non-``None`` values are resolved by
+    ``_resolve_argument_string_list``.
     """
     if argument_value is None:
-        return
+        return None
 
-    _validate_list_str(argument_name, argument_value)
+    return _resolve_argument_string_list(argument_name, argument_value)
 
 
-def _validate_none_or_str_or_list_str(argument_name: str, argument_value: object) -> None:
+def _resolve_argument_optional_substitution(argument_name: str, argument_value: object) -> Optional[str | List[str]]:
     """
-    Validate None | str | list[str].
+    Return one optional launch substitution argument.
 
     This is used for optional ROS 2 ``SomeSubstitutionsType`` fields. ``None`` is accepted because
-    the original ROS 2 type is optional.
+    those launch action fields are optional. Non-``None`` values are resolved by
+    ``_resolve_argument_substitution``.
     """
     if argument_value is None:
-        return
+        return None
 
-    _validate_str_or_list_str(argument_name, argument_value)
+    return _resolve_argument_substitution(argument_name, argument_value)
 
 
-def _validate_str(argument_name: str, argument_value: object) -> None:
+def _resolve_argument_str(argument_name: str, argument_value: object) -> str:
     """
-    Validate str.
+    Return one launch action argument as a string.
 
-    This is used for fields such as ``output_format``.
+    This is used for fields such as ``output_format``. ``None`` and non-string JSON values are
+    rejected because the corresponding launch action field requires a string.
     """
     if not isinstance(argument_value, str):
         raise ValueError(f"launch action argument '{argument_name}' must be a string")
 
+    return argument_value
 
-def _validate_str_or_list_str(argument_name: str, argument_value: object) -> None:
+
+def _resolve_argument_substitution(argument_name: str, argument_value: object) -> str | List[str]:
     """
-    Validate str | list[str].
+    Return one required launch substitution argument.
 
-    In ROS 2 Jazzy, ``SomeSubstitutionsType`` is defined in:
+    Some ROS 2 launch action fields use ``SomeSubstitutionsType``. In ROS 2 Jazzy, that type is
+    defined in:
 
     ``/opt/ros/jazzy/lib/python3.12/site-packages/launch/some_substitutions_type.py``
 
@@ -756,18 +898,12 @@ def _validate_str_or_list_str(argument_name: str, argument_value: object) -> Non
             Iterable[Union[Text, Path, Substitution]],
         ]
 
-    ``json.loads`` cannot produce Python ``Path`` objects. It also cannot produce ROS 2 launch
-    ``Substitution`` objects, such as ``LaunchConfiguration`` or ``FindPackageShare``. This helper
-    therefore accepts only the part of that type that can come from JSON: a string or a list of
-    strings.
-
-    Users should normally write a single string. For example, write ``"screen"`` instead of
-    ``["scr", "een"]``. The list form exists only because ROS 2 launch also accepts a list for
-    ``SomeSubstitutionsType``. In this helper, the list may contain only strings. When ROS 2 launch
-    resolves that list, it joins the strings into one final string. For example,
-    ``["scr", "een"]`` becomes ``"screen"``.
+    A value coming from ``json.loads`` cannot be a Python ``Path`` object. It also cannot be a ROS 2
+    launch ``Substitution`` object, such as ``LaunchConfiguration`` or ``FindPackageShare``.
+    Therefore, JSON-configured launch arguments support only the JSON-compatible part of
+    ``SomeSubstitutionsType``: one string or a list of strings.
     """
     if isinstance(argument_value, str):
-        return
+        return argument_value
 
-    _validate_list_str(argument_name, argument_value, expected_type='string or list of strings')
+    return _resolve_argument_string_list(argument_name, argument_value, 'string or list of strings')
