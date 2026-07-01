@@ -10,8 +10,8 @@ This package helps launch files do a few common tasks:
 - Use explicit launch actions to update common launch context values.
 - Compute robot namespaces, robot prefixes, and rendered parameter file paths.
 - Build parameter layers from a base file and additional overlays.
-- Parse launch action arguments from JSON strings.
-- Convert JSON remapping pairs into the tuple form expected by `launch_ros.actions.Node`.
+- Parse launch action arguments from JSON strings and Python defaults.
+- Convert remapping pairs into the tuple form expected by `launch_ros.actions.Node`.
 
 ## Launch actions
 
@@ -69,7 +69,9 @@ Without this helper, the launch file would need one launch argument for every op
 
 With this helper, each configurable action receives its own JSON string. The JSON object contains the arguments for that action directly. There is no extra key such as `"bridge"` inside the JSON.
 
-Some fields should still stay in the Python launch file. For example, the launch file should normally keep `package`, `executable`, `namespace`, `parameters`, and `cmd` visible in Python code. For the longer explanation, see [Launch action arguments technical design](doc/launch_action_arguments_design.md).
+The launch file may also provide `default_arguments`. Defaults are normal Python values written by the launch file author. They are validated by the same helper before they are returned. If the JSON object and `default_arguments` define the same field, the JSON value wins.
+
+Some fields should still stay in the Python launch file. For example, the launch file should normally keep `package`, `executable`, `parameters`, and `cmd` visible in Python code. For the longer explanation, see [Launch action arguments technical design](doc/launch_action_arguments_design.md).
 
 Resolve the JSON string inside code that has a `LaunchContext`. A common pattern is to do it inside an `OpaqueFunction` callback. The callback reads the JSON string and passes the returned arguments to the action with `**bridge_arguments`.
 
@@ -82,7 +84,7 @@ from launch_ros.actions import Node
 
 
 def launch_setup(ctx):
-    bridge_arguments = rlh.resolve_launch_action_arguments(
+    bridge_arguments = rlh.resolve_node_arguments(
         LaunchConfiguration('bridge_arguments_json_str').perform(ctx),
         default_arguments={
             'name': 'bridge',
@@ -113,7 +115,7 @@ def generate_launch_description():
     ])
 ```
 
-The helper applies no global `default_arguments`. Each launch file supplies `default_arguments` for the action it is creating. If the JSON object defines the same field, the JSON value wins.
+The helper applies no global `default_arguments`. Each launch file supplies `default_arguments` for the action it is creating.
 
 ## JSON format
 
@@ -148,13 +150,14 @@ Example `bridge_arguments_json_str` value:
 
 ## Supported fields
 
-The supported fields come from `Node`, `ExecuteProcess`, and `ExecuteLocal`. The helper accepts only JSON-compatible values for those fields. When a field is optional in the original ROS 2 constructor, `null` is accepted and becomes Python `None`.
+The supported fields come from `Node`, `ExecuteProcess`, and `ExecuteLocal`. The JSON string must use JSON-compatible values. `default_arguments` uses Python values, but it follows the same value shapes where possible. When a field is optional in the original ROS 2 constructor, `null` in JSON or `None` in Python is accepted.
 
 From `launch_ros.actions.Node`:
 
 - `name`: string preferred, `list[string]` and null accepted. For `Node`, this is the ROS node name.
 - `exec_name`: string preferred, `list[string]` and null accepted. For `Node`, this is forwarded as the launch process label.
-- `remappings`: list of two-item lists or null. The helper converts each pair into a tuple for `Node`.
+- `namespace`: string preferred, `list[string]` and null accepted.
+- `remappings`: list of two-item lists or null. In `default_arguments`, each pair may also be a tuple, for example `[('from', 'to')]`. The helper converts each pair into a tuple for `Node`.
 - `ros_arguments`: `list[string]` or null.
 - `arguments`: `list[string]` or null.
 
@@ -184,7 +187,6 @@ The helper rejects fields that should stay explicit in the launch file:
 
 - `package`
 - `executable`
-- `namespace`
 - `parameters`
 - `cmd`
 - `process_description`
