@@ -81,7 +81,7 @@ A helper API should not expose only a few selected fields and then need a new he
 
 The goal of this helper is to support one structured launch argument for the optional fields of one action. The launch argument value is a JSON string. The helper reads that JSON string, checks that the field names and value types are supported, and returns one normal Python dictionary. The launch file can then pass that dictionary to `Node`, `ExecuteProcess`, or `ExecuteLocal` with Python `**kwargs` syntax.
 
-The JSON value is not meant to replace the Python launch file. The launch file still writes the fields that decide what is being launched. Examples are `Node.package`, `Node.executable`, `Node.namespace`, `Node.parameters`, and `ExecuteProcess.cmd`. Those fields are important because they show the reader which package, executable, namespace, parameters, or command the launch file uses. They should stay visible in the Python launch code. The JSON object is only for optional fields that adjust an action that the launch file has already chosen.
+The JSON value is not meant to replace the Python launch file. The launch file still writes the fields that decide what is being launched. Examples are `Node.package`, `Node.executable`, `Node.parameters`, and `ExecuteProcess.cmd`. Those fields are important because they show the reader which package, executable, parameters, or command the launch file uses. They should stay visible in the Python launch code. The JSON object is only for optional fields that adjust an action that the launch file has already chosen. `Node.namespace` is allowed by this helper because some launch files may choose to expose the already-resolved namespace as an action argument.
 
 Each configurable action should receive its own launch argument. For example, a launch file can expose `bridge_arguments_json_str` for a bridge node and `speed_controller_arguments_json_str` for a controller node. Each JSON string contains the arguments for that one action directly. There is no extra lookup key inside the JSON object.
 
@@ -109,7 +109,7 @@ One possible design is to create one `DeclareLaunchArgument` for every optional 
 
 Another possible design is to accept any JSON object and pass it directly to the action without checking it. That would be flexible, but it would make mistakes harder to find. A typo such as `"emulate_ttyy"` would not be detected by the helper. The error would appear later, usually inside ROS 2 launch, and the message would be less connected to the original JSON input.
 
-The chosen design is strict, but only inside a clear boundary. The helper supports a known list of fields from `Node`, `ExecuteProcess`, and `ExecuteLocal`. Each supported field has a documented JSON shape. Unknown fields fail early. Fields that should stay in the launch file also fail early. The helper does not check whether a supported field belongs to the exact action that will receive it. For example, the helper can parse `remappings`, but `remappings` only makes sense for `Node`. If the launch file passes those arguments to `ExecuteProcess`, `ExecuteProcess` will reject them. That is the same kind of error the user would get when writing the same fields directly in Python.
+The chosen design is strict, but only inside a clear boundary. The helper supports a known list of fields from `Node`, `ExecuteProcess`, and `ExecuteLocal`. Each supported field has a documented JSON shape. Unknown fields fail early. Fields that should stay in the launch file also fail early. Each resolver checks the action level it is meant for. `resolve_node_arguments(...)` accepts allowed `Node`, `ExecuteProcess`, and `ExecuteLocal` fields. `resolve_execute_process_arguments(...)` accepts allowed `ExecuteProcess` and `ExecuteLocal` fields, but rejects `Node` fields such as `remappings` or `ros_arguments`. `resolve_execute_local_arguments(...)` only accepts allowed `ExecuteLocal` and `Action` fields.
 
 ## Public API
 
@@ -129,25 +129,47 @@ LAUNCH_ACTION_ARGUMENTS_DESC
 
 Use it as the `description` value when declaring an action-specific argument such as `bridge_arguments_json_str`.
 
-The parser helper name is:
+The parser helper names are:
 
 ```python
-resolve_launch_action_arguments(
-    str_json_arguments: str | None,
+resolve_execute_local_arguments(
+    json_str_arguments: str | None,
     default_arguments: dict[str, Any] | None = None,
+    extra_rejected_arguments: set[str] | None = None,
 ) -> dict[str, Any]
+
+resolve_execute_process_arguments(
+    json_str_arguments: str | None,
+    default_arguments: dict[str, Any] | None = None,
+    extra_rejected_arguments: set[str] | None = None,
+) -> dict[str, Any]
+
+resolve_node_arguments(
+    json_str_arguments: str | None,
+    default_arguments: dict[str, Any] | None = None,
+    extra_rejected_arguments: set[str] | None = None,
+) -> dict[str, Any]
+
+resolve_remappings(
+    argument_name: str,
+    argument_value: object,
+) -> list[tuple[str, str]] | None
 ```
 
-The helper parses arguments for one action. It can also receive default values from the launch file. When both `default_arguments` and the JSON object define the same field, the JSON value wins.
+Each `resolve_*_arguments(...)` helper parses arguments for one action class and its base classes. It can also receive default values from the launch file. When both `default_arguments` and the JSON object define the same field, the JSON value wins.
 
 ```text
 default_arguments < JSON object
 ```
 
+`extra_rejected_arguments` lets a launch file reject one more field for one specific action. The field must be known by that resolver. This is useful when a field is generally supported but should stay explicit in one launch file.
+
+`resolve_remappings(...)` is public because remapping conversion is useful on its own. It validates remapping pairs and returns the tuple-pair format expected by `launch_ros.actions.Node`.
+
 Example usage:
 
 ```python
-bridge_arguments = rlh.resolve_launch_action_arguments(
+bridge_arguments = rlh.resolve_node_arguments(
     LaunchConfiguration('bridge_arguments_json_str').perform(context),
     default_arguments={
         'name': 'bridge',
@@ -168,13 +190,13 @@ Node(
 
 ## What the helper does and does not do
 
-The helper only reads JSON and returns one argument dictionary. The launch file decides where that dictionary is used:
+Each helper reads the JSON string, validates `default_arguments`, and returns one argument dictionary. The launch file decides where that dictionary is used:
 
-- `Node(..., **kwargs)`
-- `ExecuteProcess(..., **kwargs)`
-- `ExecuteLocal(..., **kwargs)`
+- `resolve_node_arguments(...)` returns arguments for `Node(..., **kwargs)`.
+- `resolve_execute_process_arguments(...)` returns arguments for `ExecuteProcess(..., **kwargs)`.
+- `resolve_execute_local_arguments(...)` returns arguments for `ExecuteLocal(..., **kwargs)`.
 
-The helper checks that every field name is supported and that every value has the expected JSON type. It does not check that a field is valid for the exact action that receives it. For example, `remappings` is a supported field because it is valid for `Node`. If a launch file passes `remappings` to `ExecuteProcess`, `ExecuteProcess` will reject it. That is acceptable because the helper does not try to model all possible combinations of fields and actions.
+The helper checks that every field name is supported by the selected action class or one of its base classes, and that every value has the expected type. For example, `remappings` is supported by `resolve_node_arguments(...)` but rejected by `resolve_execute_process_arguments(...)`.
 
 The helper should feel like writing the same fields directly in Python. For example, passing `exec_name` to `ExecuteProcess` is invalid in normal launch code. It is also invalid when `exec_name` arrives through this helper.
 
@@ -182,7 +204,6 @@ The launch file still writes the fields that define what is launched. Typical ex
 
 - `Node` `package`
 - `Node` `executable`
-- `Node` `namespace`
 - `Node` `parameters`
 - `ExecuteProcess` `cmd`
 
@@ -204,7 +225,7 @@ The supported field list is based on the ROS 2 Jazzy Python files that define th
 - `launch.actions.ExecuteProcess`: `/opt/ros/jazzy/lib/python3.12/site-packages/launch/actions/execute_process.py`
 - `launch.actions.ExecuteLocal`: `/opt/ros/jazzy/lib/python3.12/site-packages/launch/actions/execute_local.py`
 
-## SomeSubstitutionsType from JSON
+## SomeSubstitutionsType values
 
 ROS 2 Jazzy defines `SomeSubstitutionsType` as:
 
@@ -217,7 +238,7 @@ SomeSubstitutionsType = Union[
 ]
 ```
 
-JSON cannot represent Python `Path` objects. JSON also cannot represent ROS 2 launch `Substitution` objects such as `LaunchConfiguration` or `FindPackageShare`. For fields typed as `SomeSubstitutionsType`, this helper supports only the part that can be written naturally in JSON:
+JSON cannot represent Python `Path` objects. JSON also cannot represent ROS 2 launch `Substitution` objects such as `LaunchConfiguration` or `FindPackageShare`. For fields typed as `SomeSubstitutionsType`, this helper supports only the part that can be written naturally in JSON. `default_arguments` follows the same rule so that defaults and JSON values use the same validation path:
 
 - string
 - list of strings
@@ -240,17 +261,17 @@ For each `SomeSubstitutionsType` field, the documentation shows the same value i
 
 ## Type and conversion rules
 
-Most JSON values are passed through directly as action arguments.
+Most JSON values are passed through directly as action arguments. `default_arguments` uses Python values, but the accepted shapes are intentionally close to the JSON shapes. This keeps the rule simple: defaults and JSON use the same field policy, and JSON values override defaults.
 
-For fields typed as `bool`, `float`, or `int`, the JSON value must use the matching JSON type directly. For example, a boolean must be written as `true` or `false`, not as `"true"` or `"false"`. A number must be written as `2.0`, not as `"2.0"`. The helper does not convert those strings into booleans or numbers. This keeps the behavior close to writing the same fields directly in Python.
+For fields typed as `bool`, `float`, or `int`, the value must use the matching type directly. In JSON, a boolean must be written as `true` or `false`, not as `"true"` or `"false"`. A number must be written as `2.0`, not as `"2.0"`. In Python defaults, use `True`, `False`, integers, or floats directly. The helper does not convert strings into booleans or numbers. This keeps the behavior close to writing the same fields directly in Python.
 
 For fields typed as `Optional[...]`, the JSON value may be `null`. A missing field and a field explicitly set to `null` are not written the same way, but both are valid. A missing field means the returned argument dictionary does not contain that field. A field set to `null` means the returned argument dictionary contains that field with Python `None` as its value.
 
-There is one JSON-to-Python conversion:
+There is one remapping conversion:
 
-- `remappings`: JSON has no tuples, but `launch_ros.actions.Node` expects each remap rule as a tuple. The helper converts `[["from", "to"]]` into `[("from", "to")]`.
+- `remappings`: JSON has no tuples, but `launch_ros.actions.Node` expects each remap rule as a tuple. JSON values use two-item lists: `[["from", "to"]]`. Python defaults may use two-item lists or two-item tuples: `[["from", "to"]]` or `[("from", "to")]`. The helper returns tuple pairs: `[("from", "to")]`.
 
-Validation is strict for supported fields. The implementation has a field schema. That schema says which JSON type is accepted for each field:
+Validation is strict for supported fields. The implementation has a field schema. That schema says which value shape is accepted for each field:
 
 - `SomeSubstitutionsType` fields: string or `list[string]`.
 - `Optional[SomeSubstitutionsType]` fields: string, `list[string]`, or null.
@@ -259,9 +280,11 @@ Validation is strict for supported fields. The implementation has a field schema
 - `int` fields: integer.
 - `Optional[float]` fields: number or null.
 - `env` and `additional_env`: object with string keys and string values, or null.
-- `remappings`: list of two-item lists of strings or null. Non-null lists are converted to tuples after validation.
+- `remappings`: list of two-item lists or tuples of strings, or null. Non-null values are converted to tuples after validation.
 
 Unknown fields fail with a clear error. This is stricter than passing everything through blindly, but it catches mistakes earlier. It also keeps the documentation and the implementation aligned: if a field is accepted by the helper, it should be listed in this document.
+
+Mutable defaults are copied after validation and conversion. This avoids a surprising case where mutating the returned argument dictionary also mutates the original `default_arguments` dictionary owned by the launch file. Values created from `json.loads(...)` are not copied again, because they are already fresh objects for that resolver call.
 
 ## Unsupported values
 
@@ -437,9 +460,13 @@ Optional fields can also be set to `null`. This is useful when the user wants to
 - `exec_name: Optional[SomeSubstitutionsType] = None`
   - JSON: string preferred. `list[string]` and null accepted.
   - Meaning for `Node`: launch process label forwarded as `ExecuteProcess.name`.
+- `namespace: Optional[SomeSubstitutionsType] = None`
+  - JSON: string preferred. `list[string]` and null accepted.
+  - Meaning for `Node`: namespace passed directly to the `Node` action.
 - `remappings: Optional[SomeRemapRules] = None`
   - JSON: list of two-item lists, for example `[["from", "to"]]`, or null.
-  - The helper converts each two-item list to a tuple before forwarding the arguments.
+  - Python defaults: list of two-item lists or two-item tuples, for example `[("from", "to")]`.
+  - The helper converts each pair to a tuple before forwarding the arguments.
 - `ros_arguments: Optional[Iterable[SomeSubstitutionsType]] = None`
   - JSON: `list[string]` or null.
 - `arguments: Optional[Iterable[SomeSubstitutionsType]] = None`
@@ -451,8 +478,6 @@ Rejected from `launch_ros.actions.Node`:
   - Reason: `package` says which ROS package provides the node. The launch file should keep that visible.
 - `executable: SomeSubstitutionsType`
   - Reason: `executable` says which binary is launched. The launch file should keep that visible.
-- `namespace: Optional[SomeSubstitutionsType] = None`
-  - Reason: `namespace` is usually part of the launch structure. It is often shared by several actions, so it should be handled explicitly by the launch file.
 - `parameters: Optional[SomeParameters] = None`
   - Reason: `parameters` already have their own file and dictionary flow. They can also contain launch values that JSON cannot represent cleanly.
 
@@ -513,9 +538,15 @@ Rejected from `launch.actions.ExecuteLocal`:
   - Reason: `ExecuteProcess` builds this object internally from `cmd` and process-level fields.
 - `on_exit: Optional[Union[SomeEntitiesType, Callable[..., Optional[SomeEntitiesType]]]] = None`
   - Reason: `on_exit` usually contains launch actions or Python callbacks. JSON cannot represent those values cleanly.
-- `condition: Optional[Condition]`
-  - Reason: `condition` normally contains launch objects such as `IfCondition`. JSON cannot represent those values cleanly.
+
+Rejected from `launch.action.Action`:
+
+- `condition: Optional[Condition] = None`
+  - Reason: conditions are launch expressions. They are clearer when written explicitly in the launch file.
 
 ## Future extensions
 
 - A file-based companion such as `bridge_arguments_file` can be added later for long project-level configurations.
+- If a future ROS 2 release changes the constructor signatures, update the known, allowed, and rejected field sets together. The tests should keep checking those sets against the target ROS 2 version.
+- Python defaults could support richer Python-only values later, but that should be an explicit design change. Today defaults intentionally follow the JSON-compatible value shapes, except that remapping pairs may be written as Python tuples.
+- More examples can be added for real launch files when a package needs to expose several actions through one root launch file.
