@@ -2,14 +2,12 @@ from ament_index_python.packages import PackageNotFoundError
 
 from .actions import ProcessParamsFile, SetGlobalNamespace, SetRobotNamespace, SetRobotPrefix
 from .helpers import (
-    LAUNCH_ACTION_ARGUMENTS_DESC,
     FileResolutionError,
     InvalidFileUriPatternError,
     NullFilePathError,
     compute_global_namespace,
     compute_robot_namespace,
     compute_robot_prefix,
-    default_launch_action_arguments_json_str,
     flatten_namespace,
     get_parameters,
     is_valid_name,
@@ -18,11 +16,17 @@ from .helpers import (
     render_params_file,
     replace_separator_in_namespace,
     resolve_file,
-    resolve_launch_action_arguments,
     resolve_name,
-    resolve_remappings,
     to_log_info_actions,
     to_prefix,
+)
+from .launch_action_arguments import (
+    LAUNCH_ACTION_ARGUMENTS_DESC,
+    default_launch_action_arguments_json_str,
+    resolve_execute_local_arguments,
+    resolve_execute_process_arguments,
+    resolve_node_arguments,
+    resolve_remappings,
 )
 from .version import __version__
 
@@ -48,7 +52,9 @@ __all__ = [
     'replace_separator_in_namespace',
     'render_params_file',
     'resolve_file',
-    'resolve_launch_action_arguments',
+    'resolve_execute_local_arguments',
+    'resolve_execute_process_arguments',
+    'resolve_node_arguments',
     'resolve_remappings',
     'resolve_name',
     'to_prefix',
