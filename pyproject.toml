@@ -5,6 +5,7 @@
 # All settings related to how Ruff analyzes and formats your code go under this table.
 [tool.ruff]
 line-length = 120
+src = []
 
 [tool.ruff.format]
 # Use single quotes for ordinary strings
@@ -65,6 +66,7 @@ docstring-quotes = "double"
 # multiline-quotes = "single"
 
 [tool.ruff.lint.isort]
+no-lines-before = ["first-party", "local-folder"]
 split-on-trailing-comma = false
 
 # ------------------------------------------------------------------------------
