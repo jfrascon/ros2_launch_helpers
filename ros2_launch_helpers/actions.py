@@ -9,8 +9,13 @@ from pathlib import Path
 
 from launch import Action, LaunchContext
 from launch.substitutions import LaunchConfiguration
-from launch.utilities.type_utils import normalize_typed_substitution, perform_typed_substitution
-
+from launch.utilities import perform_substitutions
+from launch.utilities.type_utils import (
+    SomeSubstitutionsType,
+    normalize_to_list_of_substitutions,
+    normalize_typed_substitution,
+    perform_typed_substitution,
+)
 from .helpers import compute_global_namespace, compute_robot_namespace, compute_robot_prefix, render_params_file
 
 
@@ -42,19 +47,19 @@ class ProcessParamsFile(Action):
 
     def __init__(
         self,
-        params_file: str | LaunchConfiguration = 'params_file',
-        allow_substs: str | LaunchConfiguration = 'params_file_allow_substs',
-        output_params_file_key: str = 'params_file',
+        params_file: SomeSubstitutionsType,
+        allow_substs: bool | SomeSubstitutionsType,
+        output_params_file_key: str,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.params_file = _as_launch_configuration(params_file)
-        self.allow_substs = _as_launch_configuration(allow_substs)
+        self.params_file = normalize_to_list_of_substitutions(params_file)
+        self.allow_substs = normalize_typed_substitution(allow_substs, bool)
         self.output_params_file_key = output_params_file_key
 
     def execute(self, context: LaunchContext):
-        params_file = self.params_file.perform(context)
-        allow_substs = perform_typed_substitution(context, normalize_typed_substitution(self.allow_substs, bool), bool)
+        params_file = perform_substitutions(context, self.params_file)
+        allow_substs = perform_typed_substitution(context, self.allow_substs, bool)
 
         params_file_to_return = params_file
 

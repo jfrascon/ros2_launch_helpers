@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from launch import LaunchContext
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, TextSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution
 
 import ros2_launch_helpers as rlh
 
@@ -127,6 +127,22 @@ def test_process_params_file_action_can_write_to_separate_output_key(tmp_path):
     assert ctx.launch_configurations['resolved_params_file'] == str(source_path)
 
 
+def test_process_params_file_action_accepts_path_join_substitution(tmp_path):
+    source_path = tmp_path.joinpath('source.yaml')
+    source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
+
+    ctx = LaunchContext()
+
+    result = rlh.ProcessParamsFile(
+        params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']),
+        allow_substs=False,
+        output_params_file_key='resolved_params_file',
+    ).execute(ctx)
+
+    assert result is None
+    assert ctx.launch_configurations['resolved_params_file'] == str(source_path)
+
+
 def test_process_params_file_action_requires_resolved_filesystem_path(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
@@ -136,7 +152,11 @@ def test_process_params_file_action_requires_resolved_filesystem_path(tmp_path):
     ctx.launch_configurations['params_file_allow_substs'] = 'False'
 
     with pytest.raises(FileNotFoundError, match='Params file'):
-        rlh.ProcessParamsFile().execute(ctx)
+        rlh.ProcessParamsFile(
+            params_file=LaunchConfiguration('params_file'),
+            allow_substs=LaunchConfiguration('params_file_allow_substs'),
+            output_params_file_key='params_file',
+        ).execute(ctx)
 
 
 def test_actions_accept_condition():
@@ -154,11 +174,9 @@ def test_actions_accept_condition():
         lambda: rlh.SetRobotNamespace(namespace=TextSubstitution(text='namespace')),
         lambda: rlh.SetRobotNamespace(robot_name=TextSubstitution(text='robot_name')),
         lambda: rlh.SetRobotPrefix(robot_name=TextSubstitution(text='robot_name')),
-        lambda: rlh.ProcessParamsFile(params_file=TextSubstitution(text='params_file')),
-        lambda: rlh.ProcessParamsFile(allow_substs=TextSubstitution(text='params_file_allow_substs')),
     ],
 )
-def test_actions_reject_generic_substitutions(action_factory):
+def test_context_reading_actions_reject_generic_substitutions(action_factory):
     with pytest.raises(TypeError, match='must be a launch configuration name string or LaunchConfiguration'):
         action_factory()
 
