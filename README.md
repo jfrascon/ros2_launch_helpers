@@ -32,27 +32,27 @@ def generate_launch_description():
         DeclareLaunchArgument('robot_name', default_value='robot_1'),
         DeclareLaunchArgument('params_file'),
         DeclareLaunchArgument('params_file_allow_substs', default_value='true'),
-        rlh.SetGlobalNamespace(namespace=LaunchConfiguration('namespace'), output_namespace_key='namespace'),
+        rlh.SetGlobalNamespace(namespace=LaunchConfiguration('namespace'), output_context_key='namespace'),
         rlh.SetRobotNamespace(
             namespace=LaunchConfiguration('namespace'),
             robot_name=LaunchConfiguration('robot_name'),
-            robot_namespace_key='robot_namespace',
+            output_context_key='robot_namespace',
         ),
-        rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), robot_prefix_key='robot_prefix'),
+        rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), output_context_key='robot_prefix'),
         rlh.ProcessParamsFile(
             params_file=LaunchConfiguration('params_file'),
             allow_substs=LaunchConfiguration('params_file_allow_substs'),
-            output_params_file_key='params_file',
+            output_context_key='params_file',
         ),
     ])
 ```
 
-Action inputs accept normal ROS 2 launch substitutions. A plain string is literal text. Use `LaunchConfiguration('robot_name')` when the action should read a launch argument or another value from the launch context. Output key arguments also accept substitutions; they must resolve to a non-empty launch configuration key.
+Action inputs accept normal ROS 2 launch substitutions. A plain string is literal text. Use `LaunchConfiguration('robot_name')` when the action should read a launch argument or another value from the launch context. Output context key arguments also accept substitutions; they must resolve to a non-empty launch configuration key.
 
-- `SetGlobalNamespace(namespace=..., output_namespace_key=...)` resolves one namespace value and writes the absolute namespace to the resolved output key.
-- `SetRobotNamespace(namespace=..., robot_name=..., robot_namespace_key=...)` resolves a parent namespace and robot name, then writes the combined namespace to the resolved output key.
-- `SetRobotPrefix(robot_name=..., robot_prefix_key=...)` resolves a robot name, then writes the robot prefix to the resolved output key.
-- `ProcessParamsFile(params_file=..., allow_substs=..., output_params_file_key=...)` resolves a filesystem path and a boolean substitution flag, then writes the same path or the rendered path to the resolved output key.
+- `SetGlobalNamespace(namespace=..., output_context_key=...)` resolves one namespace value and writes the absolute namespace to the resolved output context key.
+- `SetRobotNamespace(namespace=..., robot_name=..., output_context_key=...)` resolves a parent namespace and robot name, then writes the combined namespace to the resolved output context key.
+- `SetRobotPrefix(robot_name=..., output_context_key=...)` resolves a robot name, then writes the robot prefix to the resolved output context key.
+- `ProcessParamsFile(params_file=..., allow_substs=..., output_context_key=...)` resolves a filesystem path and a boolean substitution flag, then writes the same path or the rendered path to the resolved output context key.
 
 The lower-level helpers remain available for code that already has concrete values:
 

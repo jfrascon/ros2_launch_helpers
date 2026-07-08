@@ -19,9 +19,7 @@ from launch.utilities.type_utils import (
 from .helpers import compute_global_namespace, compute_robot_namespace, compute_robot_prefix, render_params_file
 
 
-def _resolve_launch_configuration_key(
-    context: LaunchContext, key: SomeSubstitutionsType, argument_name: str
-) -> str:
+def _resolve_output_context_key(context: LaunchContext, key: SomeSubstitutionsType, argument_name: str) -> str:
     resolved_key = perform_substitutions(context, key)
 
     if not resolved_key:
@@ -39,20 +37,18 @@ class ProcessParamsFile(Action):
         self,
         params_file: SomeSubstitutionsType,
         allow_substs: bool | SomeSubstitutionsType,
-        output_params_file_key: SomeSubstitutionsType,
+        output_context_key: SomeSubstitutionsType,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.params_file = normalize_to_list_of_substitutions(params_file)
         self.allow_substs = normalize_typed_substitution(allow_substs, bool)
-        self.output_params_file_key = normalize_to_list_of_substitutions(output_params_file_key)
+        self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         params_file = perform_substitutions(context, self.params_file)
         allow_substs = perform_typed_substitution(context, self.allow_substs, bool)
-        output_params_file_key = _resolve_launch_configuration_key(
-            context, self.output_params_file_key, 'output_params_file_key'
-        )
+        output_context_key = _resolve_output_context_key(context, self.output_context_key, 'output_context_key')
 
         params_file_to_return = params_file
 
@@ -62,7 +58,7 @@ class ProcessParamsFile(Action):
         if allow_substs:
             params_file_to_return = render_params_file(params_file_to_return, context)
 
-        context.launch_configurations[output_params_file_key] = params_file_to_return
+        context.launch_configurations[output_context_key] = params_file_to_return
 
 
 class SetGlobalNamespace(Action):
@@ -70,19 +66,15 @@ class SetGlobalNamespace(Action):
     Resolve one namespace value as an absolute namespace and store it in the launch context.
     """
 
-    def __init__(
-        self, namespace: SomeSubstitutionsType, output_namespace_key: SomeSubstitutionsType, **kwargs
-    ) -> None:
+    def __init__(self, namespace: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs) -> None:
         super().__init__(**kwargs)
         self.namespace = normalize_to_list_of_substitutions(namespace)
-        self.output_namespace_key = normalize_to_list_of_substitutions(output_namespace_key)
+        self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         namespace = perform_substitutions(context, self.namespace)
-        output_namespace_key = _resolve_launch_configuration_key(
-            context, self.output_namespace_key, 'output_namespace_key'
-        )
-        context.launch_configurations[output_namespace_key] = compute_global_namespace(namespace)
+        output_context_key = _resolve_output_context_key(context, self.output_context_key, 'output_context_key')
+        context.launch_configurations[output_context_key] = compute_global_namespace(namespace)
 
 
 class SetRobotNamespace(Action):
@@ -94,22 +86,20 @@ class SetRobotNamespace(Action):
         self,
         namespace: SomeSubstitutionsType,
         robot_name: SomeSubstitutionsType,
-        robot_namespace_key: SomeSubstitutionsType,
+        output_context_key: SomeSubstitutionsType,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.namespace = normalize_to_list_of_substitutions(namespace)
         self.robot_name = normalize_to_list_of_substitutions(robot_name)
-        self.robot_namespace_key = normalize_to_list_of_substitutions(robot_namespace_key)
+        self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         namespace = perform_substitutions(context, self.namespace)
         robot_name = perform_substitutions(context, self.robot_name)
-        robot_namespace_key = _resolve_launch_configuration_key(
-            context, self.robot_namespace_key, 'robot_namespace_key'
-        )
+        output_context_key = _resolve_output_context_key(context, self.output_context_key, 'output_context_key')
 
-        context.launch_configurations[robot_namespace_key] = compute_robot_namespace(namespace, robot_name)
+        context.launch_configurations[output_context_key] = compute_robot_namespace(namespace, robot_name)
 
 
 class SetRobotPrefix(Action):
@@ -117,12 +107,12 @@ class SetRobotPrefix(Action):
     Convert a robot name value into a robot prefix launch configuration.
     """
 
-    def __init__(self, robot_name: SomeSubstitutionsType, robot_prefix_key: SomeSubstitutionsType, **kwargs) -> None:
+    def __init__(self, robot_name: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs) -> None:
         super().__init__(**kwargs)
         self.robot_name = normalize_to_list_of_substitutions(robot_name)
-        self.robot_prefix_key = normalize_to_list_of_substitutions(robot_prefix_key)
+        self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         robot_name = perform_substitutions(context, self.robot_name)
-        robot_prefix_key = _resolve_launch_configuration_key(context, self.robot_prefix_key, 'robot_prefix_key')
-        context.launch_configurations[robot_prefix_key] = compute_robot_prefix(robot_name)
+        output_context_key = _resolve_output_context_key(context, self.output_context_key, 'output_context_key')
+        context.launch_configurations[output_context_key] = compute_robot_prefix(robot_name)

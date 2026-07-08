@@ -35,7 +35,7 @@ Action constructor inputs that represent runtime values should accept `SomeSubst
 
 Use plain strings for literal values, such as `'robot_1'` or `'robot_prefix'`. Use `LaunchConfiguration(...)` when the value should be read from the launch context. Do not treat a plain string as an implicit launch configuration key.
 
-Output key arguments should also accept `SomeSubstitutionsType`, but they must resolve to a non-empty string before writing into `context.launch_configurations`.
+Context key arguments should also accept `SomeSubstitutionsType`, but they must resolve to a non-empty string before writing into `context.launch_configurations`.
 
 Actions should write simple derived launch configuration values directly into `context.launch_configurations`. Do not return `SetLaunchConfiguration` actions for that case.
 
@@ -73,12 +73,12 @@ Prefer explicit actions such as:
 SetRobotNamespace(
     namespace=LaunchConfiguration('namespace'),
     robot_name=LaunchConfiguration('robot_name'),
-    robot_namespace_key='robot_namespace',
+    output_context_key='robot_namespace',
 )
 ProcessParamsFile(
     params_file=LaunchConfiguration('params_file'),
     allow_substs=LaunchConfiguration('params_file_allow_substs'),
-    output_params_file_key='params_file',
+    output_context_key='params_file',
 )
 ```
 
