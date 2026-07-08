@@ -247,6 +247,34 @@ def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
     return (resolved_yaml_file, data)
 
 
+def require_list(data: Any) -> None:
+    """Require parsed data to be a list."""
+    if not isinstance(data, list):
+        raise TypeError(f"Expected a list. Got: '{type(data).__name__}'")
+
+
+def require_mapping(data: Any) -> None:
+    """Require parsed data to be a mapping."""
+    if not isinstance(data, dict):
+        raise TypeError(f"Expected a mapping. Got: '{type(data).__name__}'")
+
+
+def require_non_empty_list(data: Any) -> None:
+    """Require parsed data to be a non-empty list."""
+    require_list(data)
+
+    if not data:
+        raise ValueError('Expected a non-empty list')
+
+
+def require_non_empty_mapping(data: Any) -> None:
+    """Require parsed data to be a non-empty mapping."""
+    require_mapping(data)
+
+    if not data:
+        raise ValueError('Expected a non-empty mapping')
+
+
 def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str:
     """
     Expand launch substitutions in one ROS parameter YAML file and return a stable copy.

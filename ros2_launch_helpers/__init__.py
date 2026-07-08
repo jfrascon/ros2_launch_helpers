@@ -1,4 +1,5 @@
 from ament_index_python.packages import PackageNotFoundError
+
 from .actions import ProcessParamsFile, SetGlobalNamespace, SetRobotNamespace, SetRobotPrefix
 from .helpers import (
     FileResolutionError,
@@ -14,6 +15,10 @@ from .helpers import (
     read_yaml_file,
     render_params_file,
     replace_separator_in_namespace,
+    require_list,
+    require_mapping,
+    require_non_empty_list,
+    require_non_empty_mapping,
     resolve_file,
     resolve_name,
     to_log_info_actions,
@@ -49,6 +54,10 @@ __all__ = [
     'is_valid_namespace',
     'read_yaml_file',
     'replace_separator_in_namespace',
+    'require_list',
+    'require_mapping',
+    'require_non_empty_list',
+    'require_non_empty_mapping',
     'render_params_file',
     'resolve_file',
     'resolve_execute_local_arguments',
