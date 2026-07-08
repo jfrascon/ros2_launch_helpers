@@ -15,7 +15,7 @@ This package helps launch files do a few common tasks:
 
 ## Launch actions
 
-Use actions when a launch file needs to read a value from the launch context, compute a new value, and write that new value back into the launch context. The action owns the launch-context part. A helper function owns the simple computation. This keeps the computation easy to test without running a full launch description.
+Use actions when a launch file needs to resolve launch substitutions, compute a new value, and write that new value back into the launch context. The action owns the launch-runtime part. A helper function owns the simple computation. This keeps the computation easy to test without running a full launch description.
 
 The actions are normal ROS 2 launch actions. Put them in the `LaunchDescription`. If the launch file first needs to read the current launch context, create or return them from an `OpaqueFunction` callback.
 
@@ -47,12 +47,12 @@ def generate_launch_description():
     ])
 ```
 
-Action inputs that read launch context values accept two forms. They can receive a launch configuration name string, such as `'robot_name'`. They can also receive a `LaunchConfiguration` object, such as `LaunchConfiguration('robot_name')`. Passing `LaunchConfiguration(...)` makes the runtime lookup explicit at the call site.
+Action inputs accept normal ROS 2 launch substitutions. A plain string is literal text. Use `LaunchConfiguration('robot_name')` when the action should read a launch argument or another value from the launch context. Output key arguments also accept substitutions; they must resolve to a non-empty launch configuration key.
 
-- `SetGlobalNamespace()` reads `namespace` and writes the absolute namespace back to `namespace`.
-- `SetRobotNamespace()` reads `namespace` and `robot_name`, then writes `robot_namespace`.
-- `SetRobotPrefix()` reads `robot_name`, then writes `robot_prefix`.
-- `ProcessParamsFile()` reads a resolved filesystem path from `params_file` and reads `params_file_allow_substs`, then writes the same path or the rendered path back to `params_file`.
+- `SetGlobalNamespace(namespace=..., output_namespace_key=...)` resolves one namespace value and writes the absolute namespace to the resolved output key.
+- `SetRobotNamespace(namespace=..., robot_name=..., robot_namespace_key=...)` resolves a parent namespace and robot name, then writes the combined namespace to the resolved output key.
+- `SetRobotPrefix(robot_name=..., robot_prefix_key=...)` resolves a robot name, then writes the robot prefix to the resolved output key.
+- `ProcessParamsFile(params_file=..., allow_substs=..., output_params_file_key=...)` resolves a filesystem path and a boolean substitution flag, then writes the same path or the rendered path to the resolved output key.
 
 The lower-level helpers remain available for code that already has concrete values:
 

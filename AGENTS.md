@@ -8,7 +8,7 @@ This package separates reusable launch logic from ROS 2 launch runtime integrati
 
 Use helper functions for rules that can run from explicit Python values. Use launch `Action` classes for behavior that participates in the ROS 2 launch execution graph.
 
-Keep actions thin. An action should read runtime values from the launch context, call helper functions for the actual rule, and write the derived value back into the launch context.
+Keep actions thin. An action should resolve launch substitutions, call helper functions for the actual rule, and write the derived value back into the launch context.
 
 Do not keep old compatibility wrappers after an API has intentionally been replaced. If the package changes API, update the callers and tests instead of leaving two supported ways to do the same thing.
 
@@ -31,12 +31,11 @@ Use these naming patterns:
 
 Use launch `Action` classes when code reads from `LaunchContext`, resolves `LaunchConfiguration`, writes launch configurations, returns launch entities, or must run at a specific point in the launch graph.
 
-Action constructor inputs that read launch context values should accept only two forms:
+Action constructor inputs that represent runtime values should accept `SomeSubstitutionsType`.
 
-- a string key, such as `'robot_name'`
-- a `LaunchConfiguration` object, such as `LaunchConfiguration('robot_name')`
+Use plain strings for literal values, such as `'robot_1'` or `'robot_prefix'`. Use `LaunchConfiguration(...)` when the value should be read from the launch context. Do not treat a plain string as an implicit launch configuration key.
 
-Do not accept generic substitutions for those inputs unless there is a concrete reason. The goal is to keep the launch configuration key visible at the call site.
+Output key arguments should also accept `SomeSubstitutionsType`, but they must resolve to a non-empty string before writing into `context.launch_configurations`.
 
 Actions should write simple derived launch configuration values directly into `context.launch_configurations`. Do not return `SetLaunchConfiguration` actions for that case.
 
@@ -71,8 +70,16 @@ Do not add public functions whose main purpose is to be passed to `OpaqueFunctio
 Prefer explicit actions such as:
 
 ```python
-SetRobotNamespace()
-ProcessParamsFile()
+SetRobotNamespace(
+    namespace=LaunchConfiguration('namespace'),
+    robot_name=LaunchConfiguration('robot_name'),
+    robot_namespace_key='robot_namespace',
+)
+ProcessParamsFile(
+    params_file=LaunchConfiguration('params_file'),
+    allow_substs=LaunchConfiguration('params_file_allow_substs'),
+    output_params_file_key='params_file',
+)
 ```
 
 over callback APIs such as:
