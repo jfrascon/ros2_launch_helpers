@@ -66,7 +66,7 @@ docstring-quotes = "double"
 # multiline-quotes = "single"
 
 [tool.ruff.lint.isort]
-no-lines-before = ["first-party", "local-folder"]
+no-lines-before = []
 split-on-trailing-comma = false
 
 # ------------------------------------------------------------------------------
