@@ -8,6 +8,7 @@ functions, and write the computed values back into the launch context.
 from pathlib import Path
 
 from launch import Action, LaunchContext
+from launch.substitution import Substitution
 from launch.utilities import perform_substitutions
 from launch.utilities.type_utils import SomeSubstitutionsType, normalize_to_list_of_substitutions
 
@@ -21,6 +22,47 @@ def _resolve_output_context_key(context: LaunchContext, key: SomeSubstitutionsTy
         raise ValueError(f'{argument_name} must resolve to a non-empty launch configuration key.')
 
     return resolved_key
+
+
+def _resolve_required_path(context: LaunchContext, path: list[Substitution]) -> Path:
+    resolved_path = perform_substitutions(context, path)
+
+    if not resolved_path:
+        raise ValueError('path must resolve to a non-empty filesystem path.')
+
+    return Path(resolved_path)
+
+
+class RequireDirectory(Action):
+    """
+    Require a launch substitution to resolve to an existing directory.
+    """
+
+    def __init__(self, path: SomeSubstitutionsType, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.path = normalize_to_list_of_substitutions(path)
+
+    def execute(self, context: LaunchContext):
+        path = _resolve_required_path(context, self.path)
+
+        if not path.is_dir():
+            raise FileNotFoundError(f"Required directory '{path}' does not exist or is not a directory.")
+
+
+class RequireFile(Action):
+    """
+    Require a launch substitution to resolve to an existing file.
+    """
+
+    def __init__(self, path: SomeSubstitutionsType, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.path = normalize_to_list_of_substitutions(path)
+
+    def execute(self, context: LaunchContext):
+        path = _resolve_required_path(context, self.path)
+
+        if not path.is_file():
+            raise FileNotFoundError(f"Required file '{path}' does not exist or is not a file.")
 
 
 class RenderParamsFile(Action):

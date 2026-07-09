@@ -169,6 +169,77 @@ def test_set_robot_prefix_action_accepts_substitution_output_context_key():
     assert ctx.launch_configurations['target_prefix'] == 'front_'
 
 
+def test_require_directory_accepts_existing_directory_path_join_substitution(tmp_path):
+    directory_path = tmp_path.joinpath('robot')
+    directory_path.mkdir()
+
+    ctx = LaunchContext()
+
+    result = rlh.RequireDirectory(path=PathJoinSubstitution([str(tmp_path), 'robot'])).execute(ctx)
+
+    assert result is None
+
+
+def test_require_directory_rejects_empty_path():
+    ctx = LaunchContext()
+
+    with pytest.raises(ValueError, match='must resolve to a non-empty filesystem path'):
+        rlh.RequireDirectory(path='').execute(ctx)
+
+
+def test_require_directory_rejects_file_path(tmp_path):
+    file_path = tmp_path.joinpath('params.yaml')
+    file_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
+
+    ctx = LaunchContext()
+
+    with pytest.raises(FileNotFoundError, match='does not exist or is not a directory'):
+        rlh.RequireDirectory(path=str(file_path)).execute(ctx)
+
+
+def test_require_directory_rejects_missing_path(tmp_path):
+    missing_path = tmp_path.joinpath('missing')
+
+    ctx = LaunchContext()
+
+    with pytest.raises(FileNotFoundError, match='does not exist or is not a directory'):
+        rlh.RequireDirectory(path=str(missing_path)).execute(ctx)
+
+
+def test_require_file_accepts_existing_file_path_join_substitution(tmp_path):
+    file_path = tmp_path.joinpath('params.yaml')
+    file_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
+
+    ctx = LaunchContext()
+
+    result = rlh.RequireFile(path=PathJoinSubstitution([str(tmp_path), 'params.yaml'])).execute(ctx)
+
+    assert result is None
+
+
+def test_require_file_rejects_directory_path(tmp_path):
+    ctx = LaunchContext()
+
+    with pytest.raises(FileNotFoundError, match='does not exist or is not a file'):
+        rlh.RequireFile(path=str(tmp_path)).execute(ctx)
+
+
+def test_require_file_rejects_empty_path():
+    ctx = LaunchContext()
+
+    with pytest.raises(ValueError, match='must resolve to a non-empty filesystem path'):
+        rlh.RequireFile(path='').execute(ctx)
+
+
+def test_require_file_rejects_missing_path(tmp_path):
+    missing_path = tmp_path.joinpath('missing.yaml')
+
+    ctx = LaunchContext()
+
+    with pytest.raises(FileNotFoundError, match='does not exist or is not a file'):
+        rlh.RequireFile(path=str(missing_path)).execute(ctx)
+
+
 def test_render_params_file_action_renders_substitutions_and_updates_launch_context(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text(

@@ -40,6 +40,7 @@ def generate_launch_description():
             output_context_key='robot_namespace',
         ),
         rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), output_context_key='robot_prefix'),
+        rlh.RequireFile(path=LaunchConfiguration('params_file')),
         rlh.RenderParamsFile(
             params_file=LaunchConfiguration('params_file'),
             output_context_key='params_file',
@@ -53,6 +54,8 @@ Action inputs accept normal ROS 2 launch substitutions. A plain string is litera
 - `SetGlobalNamespace(namespace=..., output_context_key=...)` resolves one namespace value and writes the absolute namespace to the resolved output context key.
 - `SetRobotNamespace(namespace=..., robot_name=..., output_context_key=...)` resolves a parent namespace and robot name, then writes the combined namespace to the resolved output context key.
 - `SetRobotPrefix(robot_name=..., output_context_key=...)` resolves a robot name, then writes the robot prefix to the resolved output context key.
+- `RequireDirectory(path=...)` resolves a filesystem path and requires it to be an existing directory.
+- `RequireFile(path=...)` resolves a filesystem path and requires it to be an existing file.
 - `RenderParamsFile(params_file=..., output_context_key=...)` resolves a filesystem path, renders the file using the current launch context, and writes the rendered path to the resolved output context key. Use the standard launch `condition` argument when rendering should happen only for some launch configurations.
 
 The lower-level helpers remain available for code that already has concrete values:

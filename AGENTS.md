@@ -41,7 +41,7 @@ Actions should write simple derived launch configuration values directly into `c
 
 Pass `**kwargs` to the base `Action` class so standard launch features such as `condition` remain available. Do not add explicit constructor parameters such as `condition` unless the action needs package-specific behavior.
 
-Use imperative class names for actions, such as `SetRobotNamespace` or `RenderParamsFile`.
+Use imperative class names for actions, such as `SetRobotNamespace`, `RequireFile`, or `RenderParamsFile`.
 
 ## Launch action arguments
 
@@ -75,6 +75,7 @@ SetRobotNamespace(
     robot_name=LaunchConfiguration('robot_name'),
     output_context_key='robot_namespace',
 )
+RequireFile(path=LaunchConfiguration('params_file'))
 RenderParamsFile(
     params_file=LaunchConfiguration('params_file'),
     output_context_key='params_file',
