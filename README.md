@@ -23,6 +23,7 @@ The actions are normal ROS 2 launch actions. Put them in the `LaunchDescription`
 import ros2_launch_helpers as rlh
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 
 
@@ -39,10 +40,10 @@ def generate_launch_description():
             output_context_key='robot_namespace',
         ),
         rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), output_context_key='robot_prefix'),
-        rlh.ProcessParamsFile(
+        rlh.RenderParamsFile(
             params_file=LaunchConfiguration('params_file'),
-            allow_substs=LaunchConfiguration('params_file_allow_substs'),
             output_context_key='params_file',
+            condition=IfCondition(LaunchConfiguration('params_file_allow_substs')),
         ),
     ])
 ```
@@ -52,7 +53,7 @@ Action inputs accept normal ROS 2 launch substitutions. A plain string is litera
 - `SetGlobalNamespace(namespace=..., output_context_key=...)` resolves one namespace value and writes the absolute namespace to the resolved output context key.
 - `SetRobotNamespace(namespace=..., robot_name=..., output_context_key=...)` resolves a parent namespace and robot name, then writes the combined namespace to the resolved output context key.
 - `SetRobotPrefix(robot_name=..., output_context_key=...)` resolves a robot name, then writes the robot prefix to the resolved output context key.
-- `ProcessParamsFile(params_file=..., allow_substs=..., output_context_key=...)` resolves a filesystem path and a boolean substitution flag, then writes the same path or the rendered path to the resolved output context key.
+- `RenderParamsFile(params_file=..., output_context_key=...)` resolves a filesystem path, renders the file using the current launch context, and writes the rendered path to the resolved output context key. Use the standard launch `condition` argument when rendering should happen only for some launch configurations.
 
 The lower-level helpers remain available for code that already has concrete values:
 

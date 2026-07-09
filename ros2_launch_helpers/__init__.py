@@ -1,6 +1,6 @@
 from ament_index_python.packages import PackageNotFoundError
 
-from .actions import ProcessParamsFile, SetGlobalNamespace, SetRobotNamespace, SetRobotPrefix
+from .actions import RenderParamsFile, SetGlobalNamespace, SetRobotNamespace, SetRobotPrefix
 from .helpers import (
     FileResolutionError,
     InvalidFileUriPatternError,
@@ -40,7 +40,7 @@ __all__ = [
     'InvalidFileUriPatternError',
     'LAUNCH_ACTION_ARGUMENTS_DESC',
     'PackageNotFoundError',
-    'ProcessParamsFile',
+    'RenderParamsFile',
     'SetGlobalNamespace',
     'SetRobotNamespace',
     'SetRobotPrefix',

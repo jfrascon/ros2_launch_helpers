@@ -169,7 +169,7 @@ def test_set_robot_prefix_action_accepts_substitution_output_context_key():
     assert ctx.launch_configurations['target_prefix'] == 'front_'
 
 
-def test_process_params_file_action_renders_substitutions_and_updates_launch_context(tmp_path):
+def test_render_params_file_action_renders_substitutions_and_updates_launch_context(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text(
         '/**/node:\n  ros__parameters:\n    frame_id: $(var robot_prefix)base_link\n', encoding='utf-8'
@@ -177,12 +177,10 @@ def test_process_params_file_action_renders_substitutions_and_updates_launch_con
 
     ctx = LaunchContext()
     ctx.launch_configurations['params_file'] = str(source_path)
-    ctx.launch_configurations['params_file_allow_substs'] = 'True'
     ctx.launch_configurations['robot_prefix'] = 'robot_1_'
 
-    result = rlh.ProcessParamsFile(
+    result = rlh.RenderParamsFile(
         params_file=LaunchConfiguration('params_file'),
-        allow_substs=LaunchConfiguration('params_file_allow_substs'),
         output_context_key='params_file',
     ).execute(ctx)
 
@@ -195,82 +193,85 @@ def test_process_params_file_action_renders_substitutions_and_updates_launch_con
     )
 
 
-def test_process_params_file_action_can_write_to_separate_output_context_key(tmp_path):
+def test_render_params_file_action_can_write_to_separate_output_context_key(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
 
     ctx = LaunchContext()
     ctx.launch_configurations['params_file'] = str(source_path)
-    ctx.launch_configurations['params_file_allow_substs'] = 'False'
 
-    result = rlh.ProcessParamsFile(
+    result = rlh.RenderParamsFile(
         params_file=LaunchConfiguration('params_file'),
-        allow_substs=LaunchConfiguration('params_file_allow_substs'),
         output_context_key='resolved_params_file',
     ).execute(ctx)
 
     assert result is None
     assert ctx.launch_configurations['params_file'] == str(source_path)
-    assert ctx.launch_configurations['resolved_params_file'] == str(source_path)
+    assert ctx.launch_configurations['resolved_params_file'] != str(source_path)
+    assert Path(ctx.launch_configurations['resolved_params_file']).read_text(encoding='utf-8') == (
+        '/**/node:\n  ros__parameters:\n    enabled: true\n'
+    )
 
 
-def test_process_params_file_action_accepts_path_join_substitution(tmp_path):
+def test_render_params_file_action_accepts_path_join_substitution(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
 
     ctx = LaunchContext()
 
-    result = rlh.ProcessParamsFile(
+    result = rlh.RenderParamsFile(
         params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']),
-        allow_substs=False,
         output_context_key='resolved_params_file',
     ).execute(ctx)
 
     assert result is None
-    assert ctx.launch_configurations['resolved_params_file'] == str(source_path)
+    assert ctx.launch_configurations['resolved_params_file'] != str(source_path)
+    assert Path(ctx.launch_configurations['resolved_params_file']).read_text(encoding='utf-8') == (
+        '/**/node:\n  ros__parameters:\n    enabled: true\n'
+    )
 
 
-def test_process_params_file_action_accepts_substitution_output_context_key(tmp_path):
+def test_render_params_file_action_accepts_substitution_output_context_key(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
 
     ctx = LaunchContext()
     ctx.launch_configurations['params_file_key'] = 'resolved_params_file'
 
-    result = rlh.ProcessParamsFile(
+    result = rlh.RenderParamsFile(
         params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']),
-        allow_substs=False,
         output_context_key=LaunchConfiguration('params_file_key'),
     ).execute(ctx)
 
     assert result is None
-    assert ctx.launch_configurations['resolved_params_file'] == str(source_path)
+    assert ctx.launch_configurations['resolved_params_file'] != str(source_path)
+    assert Path(ctx.launch_configurations['resolved_params_file']).read_text(encoding='utf-8') == (
+        '/**/node:\n  ros__parameters:\n    enabled: true\n'
+    )
 
 
-def test_process_params_file_action_rejects_empty_output_context_key(tmp_path):
+def test_render_params_file_action_rejects_empty_output_context_key(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
 
     ctx = LaunchContext()
 
     with pytest.raises(ValueError, match='must resolve to a non-empty launch configuration key'):
-        rlh.ProcessParamsFile(
-            params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']), allow_substs=False, output_context_key=''
+        rlh.RenderParamsFile(
+            params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']), output_context_key=''
         ).execute(ctx)
 
 
-def test_process_params_file_action_requires_resolved_filesystem_path(tmp_path):
+def test_render_params_file_action_requires_resolved_filesystem_path(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text('/**/node:\n  ros__parameters:\n    enabled: true\n', encoding='utf-8')
 
     ctx = LaunchContext()
     ctx.launch_configurations['params_file'] = f'file://{source_path}'
-    ctx.launch_configurations['params_file_allow_substs'] = 'False'
 
     with pytest.raises(FileNotFoundError, match='Params file'):
-        rlh.ProcessParamsFile(
+        rlh.RenderParamsFile(
             params_file=LaunchConfiguration('params_file'),
-            allow_substs=LaunchConfiguration('params_file_allow_substs'),
             output_context_key='params_file',
         ).execute(ctx)
 

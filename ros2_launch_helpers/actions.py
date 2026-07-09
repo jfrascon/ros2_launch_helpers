@@ -9,12 +9,7 @@ from pathlib import Path
 
 from launch import Action, LaunchContext
 from launch.utilities import perform_substitutions
-from launch.utilities.type_utils import (
-    SomeSubstitutionsType,
-    normalize_to_list_of_substitutions,
-    normalize_typed_substitution,
-    perform_typed_substitution,
-)
+from launch.utilities.type_utils import SomeSubstitutionsType, normalize_to_list_of_substitutions
 
 from .helpers import compute_global_namespace, compute_robot_namespace, compute_robot_prefix, render_params_file
 
@@ -28,37 +23,29 @@ def _resolve_output_context_key(context: LaunchContext, key: SomeSubstitutionsTy
     return resolved_key
 
 
-class ProcessParamsFile(Action):
+class RenderParamsFile(Action):
     """
-    Validate or render a resolved ROS params file and store the result in a launch configuration.
+    Render a resolved ROS params file and store the rendered path in a launch configuration.
     """
 
     def __init__(
         self,
         params_file: SomeSubstitutionsType,
-        allow_substs: bool | SomeSubstitutionsType,
         output_context_key: SomeSubstitutionsType,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.params_file = normalize_to_list_of_substitutions(params_file)
-        self.allow_substs = normalize_typed_substitution(allow_substs, bool)
         self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         params_file = perform_substitutions(context, self.params_file)
-        allow_substs = perform_typed_substitution(context, self.allow_substs, bool)
         output_context_key = _resolve_output_context_key(context, self.output_context_key, 'output_context_key')
 
-        params_file_to_return = params_file
+        if not Path(params_file).is_file():
+            raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
 
-        if not Path(params_file_to_return).is_file():
-            raise FileNotFoundError(f"Params file '{params_file_to_return}' does not exist.")
-
-        if allow_substs:
-            params_file_to_return = render_params_file(params_file_to_return, context)
-
-        context.launch_configurations[output_context_key] = params_file_to_return
+        context.launch_configurations[output_context_key] = render_params_file(params_file, context)
 
 
 class SetGlobalNamespace(Action):
