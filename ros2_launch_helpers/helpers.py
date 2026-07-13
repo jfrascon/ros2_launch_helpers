@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any, List, Optional, Tuple, Union
 
 import yaml
@@ -275,26 +274,39 @@ def require_non_empty_mapping(data: Any) -> None:
         raise ValueError('Expected a non-empty mapping')
 
 
-def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str:
+def render_params_file(params_file: Union[str, Path], ctx: LaunchContext, output_path: Union[str, Path]) -> None:
     """
-    Expand launch substitutions in one ROS parameter YAML file and return a stable copy.
+    Expand launch substitutions in one ROS parameter YAML file and write the rendered content.
 
     ``params_file`` must already be a filesystem path. This function does not resolve
     ``package://`` or ``file://`` values.
 
+    ``output_path`` is the caller-owned filesystem path where the rendered YAML is written.
+    It must be a non-empty path to a file.
+
     ``ParameterFile.evaluate()`` expands expressions such as ``$(var robot_name)`` using the
     provided launch context. The path returned by ``ParameterFile.evaluate()`` belongs to
     ``ParameterFile`` and is deleted when ``cleanup()`` runs, so this helper copies the rendered
-    YAML into a new temporary file before cleaning up.
+    YAML into ``output_path`` before cleaning up.
 
-    The returned string is the path to the stable temporary copy. The caller owns that file.
+    If this function finishes without raising an exception, the rendered YAML has been written
+    to ``output_path``.
     """
     params_file = Path(params_file)
 
     if not params_file.is_file():
         raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
 
-    output_path = _make_rendered_params_file_path()
+    if output_path is None:
+        raise TypeError('output_path must be a str or Path-like value, got None.')
+
+    if isinstance(output_path, str) and not output_path:
+        raise ValueError('output_path must not be empty.')
+
+    output_path = Path(output_path)
+
+    if output_path.is_dir():
+        raise IsADirectoryError(f"Output path '{output_path}' is a directory.")
 
     parameter_file = ParameterFile(str(params_file), allow_substs=True)
 
@@ -303,8 +315,6 @@ def render_params_file(params_file: Union[str, Path], ctx: LaunchContext) -> str
         output_path.write_text(Path(evaluated_path).read_text(encoding='utf-8'), encoding='utf-8')
     finally:
         parameter_file.cleanup()
-
-    return str(output_path)
 
 
 def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
@@ -481,14 +491,3 @@ def to_prefix(name: str) -> str:
         return name
     else:
         return f'{name}_'
-
-
-def _make_rendered_params_file_path() -> Path:
-    """
-    Create a temporary YAML file path for rendered ROS parameters.
-
-    The file is created immediately, so concurrent launch processes cannot choose the same path.
-    The caller receives the path and can overwrite the file with the rendered YAML content.
-    """
-    with NamedTemporaryFile(prefix='robot_params_', suffix='.yaml', delete=False) as temp_file:
-        return Path(temp_file.name)
