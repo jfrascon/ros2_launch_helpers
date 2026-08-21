@@ -33,6 +33,7 @@ repos:
       - id: check-shebang-scripts-are-executable
       - id: check-symlinks
       - id: check-yaml
+        exclude: '(^|/)\.clang-format$'
       - id: check-json
       - id: check-xml
       - id: check-toml
@@ -107,7 +108,7 @@ repos:
         entry: ament_cpplint
         language: system
         files: '\.(h\+\+|h|hh|hxx|hpp|cuh|c|cc|cpp|cu|c\+\+|cxx|tpp|txx)$'
-        args: ["--linelength=120", "--filter=-whitespace/newline,-build/include_order,-runtime/indentation_namespace"]
+        args: ["--linelength=120", "--filter=-whitespace/newline,-build/include_order,-runtime/indentation_namespace,-legal/copyright"]
 
       - id: ament_lint_cmake
         name: ament_lint_cmake
