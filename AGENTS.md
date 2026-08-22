@@ -1,110 +1,56 @@
-# ros2_launch_helpers instructions
+# Repository Instructions for Agents
 
-These instructions apply only to this package.
+## Implementation Discipline
 
-## Architecture
+These rules govern task execution and changes to code, configuration, tests, or documentation.
 
-This package separates reusable launch logic from ROS 2 launch runtime integration.
+- For inquiry tasks such as explaining, reviewing, diagnosing, or planning, report findings instead of changing files unless the user asks for edits.
+- Before changing behavior, read the relevant existing code, tests, and local guidance so the change fits the current implementation.
+- Preserve existing external interfaces unless the request requires changing them. If a change affects APIs, CLI flags, configuration keys, environment variables, ROS topics, services, actions, parameters, launch arguments, frame IDs, Docker ports or volumes, or model input/output schemas, mention it explicitly.
+- Do not silently choose between ambiguous interpretations. State assumptions when they affect the implementation or verification path; if multiple interpretations exist, list the options briefly and choose the narrowest reasonable path, or ask when the ambiguity would make the change risky.
+- Prefer the smallest solution that satisfies the request. If a simpler approach exists, say so. Do not add speculative features, abstractions, configurability, or error handling for impossible scenarios.
+- If a change is becoming much larger than the problem requires, pause and simplify before continuing.
+- Keep changes focused on the user's request. Do not refactor, reformat, rename, or rewrite adjacent code unless it is required for the requested change.
+- Ask for confirmation before destructive or hard-to-reverse operations, or any material expansion of the requested scope.
+- Match the existing style and local patterns, even when another style would also be valid.
+- Do not revert or overwrite user changes unless explicitly requested.
+- Clean up unused imports, variables, functions, or files introduced by your own changes. Mention unrelated pre-existing dead code when useful, but do not delete it unless explicitly asked.
+- For multi-step tasks, keep the plan brief and tied to verifiable outcomes.
+- Before finishing, run the most focused available validation for the changed behavior, such as a relevant test, typecheck, lint, or configuration validation. Prefer targeted checks before repo-wide commands, and continue until the change is verified or a blocker is clear.
 
-Use helper functions for rules that can run from explicit Python values. Use launch `Action` classes for behavior that participates in the ROS 2 launch execution graph.
+## Technical Writing
 
-Keep actions thin. An action should resolve launch substitutions, call helper functions for the actual rule, and write the derived value back into the launch context.
+These rules apply when writing or rewriting code comments, README content, design notes, and other explanatory prose committed to the repository.
 
-Do not keep old compatibility wrappers after an API has intentionally been replaced. If the package changes API, update the callers and tests instead of leaving two supported ways to do the same thing.
+- Prioritize clarity over brevity when explaining behavior, decisions, or interfaces.
+- Write for a reader who may arrive with little or no prior context.
+- Explain what the code, configuration, document, or interface does before explaining why it is written that way.
+- Prefer literal, explicit wording over elegant or compressed wording.
+- Name concrete behavior, boundaries, files, parameters, APIs, and externally visible effects directly.
+- When two concepts are similar, explain the difference instead of relying on the reader to infer it.
+- Use existing project terminology consistently; clarify ambiguous terms when they could be misread.
+- Add code comments sparingly. Prefer comments that explain why complex logic exists, not comments that restate what the code already says.
+- Do not use comments to describe the agent's change process or to talk to the user.
+- Avoid filler, marketing language, exhaustive changelogs, and prose that repeats the diff.
 
-## Helpers
+## Conventional Commits
 
-Use helpers when code receives concrete Python values, returns concrete Python values, and can be tested without running a launch description.
+All commit messages MUST follow the Conventional Commits specification.
 
-Helpers should contain validation, parsing, path resolution, naming rules, YAML loading, parameter layering, and file rendering rules that are reusable outside an `Action`.
+This rule only governs the commit message text. The user decides which changes belong in each commit.
 
-Validate public helper inputs defensively when invalid values would produce unclear errors or make future callers easy to misuse. Private helpers may rely on nearby validation when the invariant is clear.
+Use one of the following types, intentionally aligned with the repository's `conventional-pre-commit` validation:
 
-Use these naming patterns:
+`build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, or `test`.
 
-- `compute_*` for pure derived values.
-- `resolve_*` for path, URI, launch configuration, JSON, or layered configuration resolution.
-- `render_*` for functions that write rendered output.
-- `to_*` for simple conversion helpers.
-
-## Actions
-
-Use launch `Action` classes when code reads from `LaunchContext`, resolves `LaunchConfiguration`, writes launch configurations, returns launch entities, or must run at a specific point in the launch graph.
-
-Action constructor inputs that represent runtime values should accept `SomeSubstitutionsType`.
-
-Use plain strings for literal values, such as `'robot_1'` or `'robot_prefix'`. Use `LaunchConfiguration(...)` when the value should be read from the launch context. Do not treat a plain string as an implicit launch configuration key.
-
-Context key arguments should also accept `SomeSubstitutionsType`, but they must resolve to a non-empty string before writing into `context.launch_configurations`.
-
-Actions should write simple derived launch configuration values directly into `context.launch_configurations`. Do not return `SetLaunchConfiguration` actions for that case.
-
-Pass `**kwargs` to the base `Action` class so standard launch features such as `condition` remain available. Do not add explicit constructor parameters such as `condition` unless the action needs package-specific behavior.
-
-Use imperative class names for actions, such as `SetRobotNamespace`, `RequireFile`, or `RenderParamsFile`.
-
-## Launch action arguments
-
-Use an action-specific JSON launch argument, such as `bridge_arguments_json_str`, for optional fields from one `Node`, `ExecuteProcess`, or `ExecuteLocal` action.
-
-The helper should be strict. It should reject unknown fields, reject fields that belong explicitly in the launch file, and validate the JSON type for every supported field.
-
-The JSON object should contain arguments for one action directly. Do not add lookup keys such as `bridge` or `speed_controller` inside that JSON object.
-
-Do not make this helper a second launch language. Fields such as `package`, `executable`, `namespace`, `parameters`, and `cmd` should stay visible in Python launch code.
-
-If a supported ROS 2 field is `Optional[...]`, JSON `null` should be accepted and returned as Python `None`. If a supported ROS 2 field is not optional, JSON `null` should be rejected.
-
-When the launch action arguments helper changes, update all four places together:
-
-- `ros2_launch_helpers/helpers.py`
-- `tests/test_launch_action_arguments.py`
-- `doc/launch_action_arguments_design.md`
-- `README.md`
-
-
-## Public API
-
-Do not add public functions whose main purpose is to be passed to `OpaqueFunction`.
-
-Prefer explicit actions such as:
-
-```python
-SetRobotNamespace(
-    namespace=LaunchConfiguration('namespace'),
-    robot_name=LaunchConfiguration('robot_name'),
-    output_context_key='robot_namespace',
-)
-RequireFile(path=LaunchConfiguration('params_file'))
-RenderParamsFile(
-    params_file=LaunchConfiguration('params_file'),
-    output_context_key='params_file',
-    condition=IfCondition(LaunchConfiguration('params_file_allow_substs')),
-)
-```
-
-over callback APIs such as:
-
-```python
-OpaqueFunction(function=set_robot_namespace)
-```
-
-## Documentation
-
-Write package documentation in a plain, pedagogical style. Prefer direct sentences that explain one idea at a time.
-
-Use sentence-case headings, for example `## What the helper does and does not do`.
-
-Keep README examples small and runnable in spirit. If an example uses a launch context, show where that context comes from, usually an `OpaqueFunction` callback.
-
-Use the README for the short usage path. Use `doc/launch_action_arguments_design.md` for longer design reasoning and detailed field references.
-
-## Tests
-
-Test detailed rules on helpers.
-
-Test launch-context integration on actions.
-
-Every action should have tests that prove which launch configuration keys it reads and writes.
-
-For launch action arguments, test valid values, invalid field names, rejected fields, invalid JSON types, `null` handling for optional fields, and rejection of `null` for non-optional fields.
+- Use the format `type(scope): description`, where the scope is optional.
+- Use a lowercase type.
+- Write the description as a concise imperative statement without a trailing period.
+- Mark breaking changes with `!` before the colon or with a `BREAKING CHANGE:` footer.
+- If `!` is used, the description should describe the breaking change; a `BREAKING CHANGE:` footer may still be added for extra detail.
+- For non-trivial commits, add a concise body after a blank line explaining what changed and why it matters.
+- Mention relevant behavior, configuration, dependency, launch, model, or interface changes when useful.
+- Do not repeat the diff or write an exhaustive changelog.
+- Omit the body for trivial commits where the description is sufficient.
+- Keep system-generated merge commit messages as generated.
+- Do not introduce additional commit types unless explicitly requested by the user or deliberately added to the repository policy.
