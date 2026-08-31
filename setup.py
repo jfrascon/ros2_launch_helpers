@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='Juan Francisco Rascon Crespo',
     maintainer_email='jfracon@gmail.com',
-    description='Helpers for ROS 2 launch files: params overlays, launch action arguments, and CLI overrides',
+    description='Helpers for ROS 2 launch files: parameter rendering, action arguments, and namespace handling.',
     license='Apache-2.0',
     extras_require={'test': ['pytest']},
     entry_points={'console_scripts': []},

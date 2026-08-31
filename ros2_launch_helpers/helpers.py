@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple, Union
 
+import rclpy.validate_namespace
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescriptionEntity
@@ -35,191 +36,89 @@ class InvalidFileUriPatternError(FileResolutionError):
     """
 
 
-def compute_global_namespace(namespace: str) -> str:
-    """
-    Return the global namespace that should be stored in the launch context.
-
-    ``namespace`` is the namespace value provided by the user. It can be empty, relative, absolute,
-    or ``/``. The returned value is resolved from the root namespace, so a relative value such as
-    ``robots`` becomes ``/robots``.
-
-    This function only applies the naming rule. The launch action that calls it is responsible for
-    reading ``namespace`` from the launch context and writing the resolved value back.
-    """
-    return resolve_name('/', namespace)
-
-
-def compute_robot_namespace(namespace: str, robot_name: str) -> str:
-    """
-    Return the namespace for one robot inside a parent namespace.
-
-    ``namespace`` is the parent namespace and ``robot_name`` is the child name that identifies the
-    robot. If ``namespace`` is ``/fleet`` and ``robot_name`` is ``mima``, the returned namespace is
-    ``/fleet/mima``.
-
-    This function only applies the naming rule. It does not read or write launch configurations.
-    """
-    return resolve_name(namespace, robot_name)
-
-
-def compute_robot_prefix(robot_name: str) -> str:
-    """
-    Return the prefix derived from one robot name.
-
-    The prefix is used by callers that need a stable text prefix for frame names, topic names, or
-    other generated identifiers. If ``robot_name`` already ends with ``_``, it is returned as-is.
-    Otherwise, one trailing ``_`` is added.
-    """
-    return to_prefix(robot_name)
-
-
 def flatten_namespace(namespace: str, new_sep: str) -> str:
     """
-    Convert a ROS namespace into one flat string.
+    Convert a namespace into one flat string.
 
-    ``namespace`` must be a valid ROS namespace. The leading and trailing ``/`` characters are
-    removed before the inner ``/`` separators are replaced with ``new_sep``.
+    ``namespace`` can be empty, relative, or absolute.
+    The ``namespace`` is validated before flattening.
+    The root namespace ``/`` and the empty namespace, ``''``, both return ``''`` because they do not
+    contain a concrete namespace segment.
+    ``new_sep`` must be one character other than ``/`` so the result no longer contains namespace
+    separators.
 
     For example, ``/fleet/robot1`` with ``new_sep="_"`` returns ``fleet_robot1``.
-    The root namespace ``/`` and the empty namespace ``''`` both return ``''`` because they do not
-    contain a concrete namespace segment.
     """
-    if not isinstance(namespace, str):
-        raise ValueError('Namespace must be a string')
+    validate_namespace(namespace)
 
-    if not is_valid_namespace(namespace):
-        raise RuntimeError(f"Invalid namespace '{namespace}'")
+    if not isinstance(new_sep, str) or len(new_sep) != 1 or new_sep == '/':
+        raise ValueError("New separator must be a single character other than '/'")
 
     if namespace in ('', '/'):
         return ''
 
-    return replace_separator_in_namespace(namespace.strip('/'), new_sep)
+    return namespace.removeprefix('/').replace('/', new_sep)
 
 
-def get_parameters(params_file: str, overlay_params_file_list: str = '') -> list[Any]:
+def make_namespace_absolute(namespace: str) -> str:
     """
-    Build the ``parameters`` list for a ROS 2 launch ``Node``.
+    Return an absolute namespace derived from the provided namespace.
 
-    ``params_file`` is the required base YAML file. ``overlay_params_file_list`` is an optional
-    comma-separated list of extra YAML files. Empty overlay entries, duplicate overlay entries, and
-    an overlay equal to ``params_file`` are ignored.
-
-    Each returned item is a ``ParameterFile`` with substitutions enabled. The returned list can be
-    passed directly to the ``parameters`` field of a ``Node``.
+    ``namespace`` is the namespace value provided by the user.
+    It can be empty, relative, absolute, or ``/``.
+    The root namespace ``/`` is returned unchanged.
+    The empty namespace ``''`` and relative values become absolute by adding one leading ``/``.
     """
-    params_file = params_file.strip()
+    validate_namespace(namespace)
 
-    if not params_file:
-        raise ValueError('params_file is required')
+    if namespace.startswith('/'):
+        return namespace
 
-    parameters = [ParameterFile(params_file, allow_substs=True)]
-
-    if not overlay_params_file_list:
-        return parameters
-
-    seen: set[str] = set()
-
-    for p_file in overlay_params_file_list.split(','):
-        p_file = p_file.strip()
-
-        if not p_file or p_file == params_file or p_file in seen:
-            continue
-
-        seen.add(p_file)
-
-        # Defer substitutions, env, package shares to launch.
-        parameters.append(ParameterFile(p_file, allow_substs=True))
-
-    return parameters
+    return f'/{namespace}'
 
 
-def is_valid_name(s: str) -> bool:
+def make_robot_namespace(namespace: str, robot_name: str) -> str:
     """
-    Return whether one name segment is valid for this helper module.
+    Return the namespace for one robot inside a parent namespace.
 
-    A valid segment is a non-empty string with at most 255 characters. It must not start with a
-    number, and every character must be ASCII alphanumeric or ``_``.
+    ``namespace`` is the parent namespace.
+    ``robot_name`` is the name segment that identifies the robot.
 
-    The rule intentionally matches the ROS 2 node-name validation style used by this package. The
-    function returns ``False`` instead of raising because callers often use it inside validation
-    paths that build their own error message.
+    The result preserves whether the parent namespace is relative or absolute.
+    An empty or relative parent namespace produces a relative robot namespace.
+    A root or absolute parent namespace produces an absolute robot namespace.
+
+    For example, ``fleet`` and ``robot1`` produce ``fleet/robot1``.
+    If ``namespace`` is ``/fleet`` and ``robot_name`` is ``robot1``, the returned namespace is
+    ``/fleet/robot1``.
+
+    Use ``make_namespace_absolute`` on the result when the caller always needs an absolute robot
+    namespace.
     """
-    if not isinstance(s, str):
-        return False
+    validate_namespace(namespace)
+    validate_name_segment(robot_name)
 
-    if not s:
-        return False
+    if namespace in ('', '/'):
+        robot_namespace = namespace + robot_name
+    else:
+        robot_namespace = f'{namespace}/{robot_name}'
 
-    # ROS 2 node name max length.
-    if len(s) > 255:
-        return False
-
-    # Must not start with a number.
-    if s[0].isdigit():
-        return False
-
-    # Check all characters.
-    # Valid characters are ASCII alphanumeric or underscore, [A-Za-z0-9_].
-    # If any other character is found, return False.
-    return all((c == '_') or (c.isascii() and c.isalnum()) for c in s)
+    validate_namespace(robot_namespace)
+    return robot_namespace
 
 
-def is_valid_namespace(ns: str) -> bool:
+def make_robot_prefix(robot_name: str) -> str:
     """
-    Return whether one namespace string is valid for this helper module.
+    Return the prefix derived from one robot name.
+    This function is just a wrapper around ``to_prefix()`` with a more descriptive name for callers
+    that want a prefix derived from a robot name.
 
-    The empty namespace ``''`` and the root namespace ``/`` are valid special cases. Other
-    namespaces may be relative, such as ``robot1``, or absolute, such as ``/fleet/robot1``.
-
-    Each non-empty segment must pass ``is_valid_name``. Repeated separators are rejected, so
-    ``/fleet//robot1`` is invalid.
+    The prefix is used by callers that need a stable text prefix for frame names, topic names, or
+    other identifiers.
+    If ``robot_name`` already ends with ``_``, it is returned as-is.
+    Otherwise, one trailing ``_`` is added.
     """
-    if not isinstance(ns, str):
-        return False
-
-    if ns in ('', '/'):
-        return True
-
-    # When two or more slashes are contiguous, splitting the string by '/' produces empty segments.
-    # For example:
-    # 'ns1//ns2'   -> ['ns1', '', 'ns2'] --> two or more '/' in a row
-    # '/ns1//ns2/' -> ['', 'ns1', '', 'ns2', ''] -> the first and last are false positives.
-
-    # To check if there are two or more '/' in a row, first remove the leading and trailing
-    # slashes if present.
-
-    # Remove EXACTLY ONE leading slash.
-    if ns.startswith('/'):
-        ns = ns[1:]
-
-    # Remove EXACTLY ONE trailing slash.
-    if ns.endswith('/'):
-        ns = ns[:-1]
-
-    # If ns is '//', removing leading and trailing slashes produces '', which is invalid.
-    if not ns:
-        return False
-
-    # Examples at this point:
-    # '/ns1//ns2/' -> 'ns1//ns2' -> ['ns1', '', 'ns2'] -> two or more '/' in a row.
-    # But
-    # '/ns1/ns2/'  -> 'ns1/ns2'  -> ['ns1', 'ns2'] -> OK. Leading and trailing
-    # slashes are accepted, although the trailing slash is not necessary.
-
-    items = ns.split('/')
-
-    for item in items:
-        # Empty items means two or more '/' in a row, so this is an error.
-        # Technically, this check is redundant because 'is_valid_name' returns False for empty
-        # strings, but keeping it here makes the namespace rule explicit.
-        if not item:
-            return False
-
-        # Check the item is valid, which means ASCII alnum or underscore only, [A-Za-z0-9_].
-        if not is_valid_name(item):
-            return False
-
-    return True
+    return to_prefix(robot_name)
 
 
 def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
@@ -227,12 +126,13 @@ def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
     Resolve, read, and parse one YAML file.
 
     ``yaml_file`` can be a regular path, a ``file://`` URI, or a ``package://`` URI accepted by
-    ``resolve_file``. The returned tuple contains the resolved filesystem path and the Python value
-    returned by ``yaml.safe_load``.
+    ``resolve_file``.
+    The returned tuple contains the resolved filesystem path and the Python value returned by
+    ``yaml.safe_load``.
 
-    If the YAML file only contains comments or whitespace, the parsed value is ``None``. The
-    function raises if the path cannot be resolved, the resolved path is not a file, the file cannot
-    be read as UTF-8, or the YAML content is invalid.
+    If the YAML file only contains comments or whitespace, the parsed value is ``None``.
+    The function raises if the path cannot be resolved, the resolved path is not a file, the file
+    cannot be read as UTF-8, or the YAML content is invalid.
     """
     resolved_yaml_file = resolve_file(yaml_file)
     resolved_yaml_path = Path(resolved_yaml_file)
@@ -321,21 +221,19 @@ def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
     """
     Replace every ``/`` character in a valid namespace with another single character.
 
-    ``namespace`` must be valid according to ``is_valid_namespace``. ``new_sep`` must be a
-    one-character string.
+    ``namespace`` can be empty, relative, or absolute.
+    It must pass ``validate_namespace``.
+    ``new_sep`` must be a one-character string.
+    Passing ``/`` leaves the namespace unchanged.
 
-    This function does not remove leading or trailing ``/`` characters. For example,
-    ``/ns1/ns2/`` with ``new_sep="_"`` returns ``_ns1_ns2_``. Use ``flatten_namespace`` when the
-    leading and trailing separators must be removed before replacement.
+    The root marker is preserved.
+    For example, ``/ns1/ns2`` with ``new_sep="_"`` returns ``_ns1_ns2``.
+    Use ``flatten_namespace`` when the result must not include that marker.
     """
-    if not isinstance(namespace, str):
-        raise ValueError('Namespace must be a string')
+    validate_namespace(namespace)
 
     if not isinstance(new_sep, str) or len(new_sep) != 1:
         raise ValueError('New separator must be a single character string')
-
-    if not is_valid_namespace(namespace):
-        raise RuntimeError(f"Invalid namespace '{namespace}'")
 
     return namespace.replace('/', new_sep)
 
@@ -405,52 +303,6 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
     return os.path.expanduser(file)
 
 
-def resolve_name(parent_namespace: str, child_name: str) -> str:
-    """
-    Resolve one child namespace against one parent namespace.
-
-    ``parent_namespace`` and ``child_name`` must both be valid namespaces according to
-    ``is_valid_namespace``. ``child_name`` can be empty, relative, absolute, or ``/``.
-
-    If ``child_name`` is relative, it is appended under ``parent_namespace``. If ``child_name`` is
-    absolute, it is returned as the result and ``parent_namespace`` is ignored. If ``child_name`` is
-    empty, the normalized ``parent_namespace`` is returned.
-
-    The function removes trailing separators where needed, but it does not collapse invalid
-    repeated separators such as ``//``. Invalid inputs raise ``ValueError``.
-    """
-    if not isinstance(parent_namespace, str) or not isinstance(child_name, str):
-        raise ValueError('Arguments must be strings')
-
-    if not is_valid_namespace(parent_namespace):
-        raise ValueError(f"Invalid parent namespace '{parent_namespace}'")
-
-    if not is_valid_namespace(child_name):
-        raise ValueError(f"Invalid child name '{child_name}'")
-
-    # If the child name starts with '/', it is an absolute namespace, so we return it as is.
-    # - child_name = '/'           -> resolved_namespace = '/'
-    # - child_name = '/ns1/ns2[/]' -> resolved_namespace = '/ns1/ns2'
-    if child_name.startswith('/'):
-        return child_name if child_name == '/' else child_name.rstrip('/')
-
-    # If the child namespace is empty, we return the parent namespace as is (after normalizing it to
-    # avoid ending with '/').
-    if child_name == '':
-        return parent_namespace if parent_namespace in ('', '/') else parent_namespace.rstrip('/')
-
-    # If here, the child namespace is a relative namespace, not empty.
-
-    # If the parent namespace is empty or '/', the parent namespace and the child namespace are
-    # concatenated without adding an extra '/' between them.
-    if parent_namespace in ('', '/'):
-        return parent_namespace + child_name.rstrip('/')
-
-    # If here, a possible '/' is stripped off the end of the parent namespace, and the child
-    # namespace is concatenated to it with a '/' in between.
-    return parent_namespace.rstrip('/') + '/' + child_name.rstrip('/')
-
-
 def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
     """
     Convert text messages into ``LogInfo`` launch entities.
@@ -470,24 +322,89 @@ def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
     return entities
 
 
-def to_prefix(name: str) -> str:
+def to_prefix(name_segment: str) -> str:
     """
-    Convert one valid name into a prefix string.
+    Convert one valid name segment into a prefix string.
 
-    ``name`` must be a valid name according to ``is_valid_name``. If it already ends with ``_``, it
-    is returned unchanged. Otherwise, the returned prefix is ``name`` plus one trailing ``_``.
+    ``name_segment`` must pass ``validate_name_segment``. If it already ends with ``_``, it is
+    returned unchanged. Otherwise, the returned prefix is ``name_segment`` plus one trailing ``_``.
 
     This helper is used when a caller wants names such as ``robot`` to become stable prefixes such
     as ``robot_`` without adding a second underscore to names that already have one.
     """
-    if not isinstance(name, str):
-        raise ValueError('name must be a string to create a prefix')
+    validate_name_segment(name_segment)
 
-    if not is_valid_name(name):
-        raise RuntimeError(f"'{name}' must be a non-empty string with ASCII [A-Za-z0-9_] only to create a prefix")
+    if name_segment.endswith('_'):
+        return name_segment
 
-    # If the name already ends with '_', return it as is.
-    if name.endswith('_'):
-        return name
-    else:
-        return f'{name}_'
+    return f'{name_segment}_'
+
+
+def validate_name_segment(name_segment: str) -> Literal[True]:
+    """
+    Validate one project name segment and return ``True``.
+
+    ROS 2 defines a "name token" on this design page:
+    https://design.ros2.org/articles/topic_and_service_names.html#name-tokens
+
+    A name token is one non-empty part between the ``/`` separators of a topic or service name.
+    ROS 2 name tokens may contain ASCII letters, numbers, underscores, balanced substitutions in
+    ``{}``, or the private-name token ``~``.
+    A token must not start with a number.
+
+    This project uses the separate term "name segment" because this function does not implement
+    every ROS 2 name-token form.
+    A name segment identifies a generic project entity, such as a robot or another named resource.
+    It is not itself a topic, service, namespace, node name, or package name.
+
+    A name segment must start with an ASCII letter.
+    Every remaining character must be an ASCII letter, a number, or ``_``.
+    This intentionally rejects substitutions, ``~``, separators, and a leading underscore.
+    The stricter rules make the segment safe to include later in concrete ROS names.
+    The complete topic, service, or namespace must still be validated with its matching ROS 2
+    validator after it is constructed.
+    """
+    if not isinstance(name_segment, str):
+        raise TypeError('name_segment must be a string')
+
+    if not name_segment:
+        raise ValueError('name_segment must not be empty')
+
+    first_character = name_segment[0]
+
+    if not first_character.isascii() or not first_character.isalpha():
+        raise ValueError('name_segment must start with an ASCII letter')
+
+    for index, character in enumerate(name_segment[1:], start=1):
+        if character == '_' or (character.isascii() and character.isalnum()):
+            continue
+
+        raise ValueError(
+            f'name_segment contains invalid character {character!r} at index {index}; '
+            "only ASCII letters, numbers, and '_' are allowed"
+        )
+
+    return True
+
+
+def validate_namespace(namespace: str) -> Literal[True]:
+    """
+    Validate one namespace value accepted by this launch helper module.
+
+    The empty namespace ``''`` and the root namespace ``/`` are valid inputs.
+
+    ``rclpy.validate_namespace.validate_namespace`` accepts only non-empty absolute namespaces.
+    If a relative namespace is provided, this function converts it to an absolute namespace before
+    calling the rclpy validator.
+    The conversion is only used for validation; it does not modify the provided value.
+    """
+    if not isinstance(namespace, str):
+        raise TypeError('namespace must be a string')
+
+    if namespace in ('', '/'):
+        return True
+
+    absolute_namespace = namespace if namespace.startswith('/') else f'/{namespace}'
+    rclpy.validate_namespace.validate_namespace(absolute_namespace)
+
+    return True

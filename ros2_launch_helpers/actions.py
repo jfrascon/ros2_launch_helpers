@@ -12,7 +12,7 @@ from launch import Action, LaunchContext
 from launch.utilities import perform_substitutions
 from launch.utilities.type_utils import SomeSubstitutionsType, normalize_to_list_of_substitutions
 
-from .helpers import compute_global_namespace, compute_robot_namespace, compute_robot_prefix, render_params_file
+from .helpers import make_namespace_absolute, make_robot_namespace, make_robot_prefix, render_params_file
 
 
 def _resolve_context_key(context: LaunchContext, key: SomeSubstitutionsType, argument_name: str) -> str:
@@ -103,7 +103,7 @@ class SetGlobalNamespace(Action):
     def execute(self, context: LaunchContext):
         namespace = perform_substitutions(context, self.namespace)
         output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
-        context.launch_configurations[output_context_key] = compute_global_namespace(namespace)
+        context.launch_configurations[output_context_key] = make_namespace_absolute(namespace)
 
 
 class SetRobotNamespace(Action):
@@ -128,7 +128,7 @@ class SetRobotNamespace(Action):
         robot_name = perform_substitutions(context, self.robot_name)
         output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
 
-        context.launch_configurations[output_context_key] = compute_robot_namespace(namespace, robot_name)
+        context.launch_configurations[output_context_key] = make_robot_namespace(namespace, robot_name)
 
 
 class SetRobotPrefix(Action):
@@ -144,4 +144,4 @@ class SetRobotPrefix(Action):
     def execute(self, context: LaunchContext):
         robot_name = perform_substitutions(context, self.robot_name)
         output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
-        context.launch_configurations[output_context_key] = compute_robot_prefix(robot_name)
+        context.launch_configurations[output_context_key] = make_robot_prefix(robot_name)

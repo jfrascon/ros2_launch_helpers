@@ -5,7 +5,6 @@ These tests verify that ros2_launch_helpers expands launch substitutions inside 
 and writes the rendered YAML to the requested output path.
 """
 
-
 import pytest
 import ros2_launch_helpers as rlh
 from launch import LaunchContext

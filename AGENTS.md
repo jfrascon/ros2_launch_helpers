@@ -18,21 +18,6 @@ These rules govern task execution and changes to code, configuration, tests, or 
 - For multi-step tasks, keep the plan brief and tied to verifiable outcomes.
 - Before finishing, run the most focused available validation for the changed behavior, such as a relevant test, typecheck, lint, or configuration validation. Prefer targeted checks before repo-wide commands, and continue until the change is verified or a blocker is clear.
 
-## Technical Writing
-
-These rules apply when writing or rewriting code comments, README content, design notes, and other explanatory prose committed to the repository.
-
-- Prioritize clarity over brevity when explaining behavior, decisions, or interfaces.
-- Write for a reader who may arrive with little or no prior context.
-- Explain what the code, configuration, document, or interface does before explaining why it is written that way.
-- Prefer literal, explicit wording over elegant or compressed wording.
-- Name concrete behavior, boundaries, files, parameters, APIs, and externally visible effects directly.
-- When two concepts are similar, explain the difference instead of relying on the reader to infer it.
-- Use existing project terminology consistently; clarify ambiguous terms when they could be misread.
-- Add code comments sparingly. Prefer comments that explain why complex logic exists, not comments that restate what the code already says.
-- Do not use comments to describe the agent's change process or to talk to the user.
-- Avoid filler, marketing language, exhaustive changelogs, and prose that repeats the diff.
-
 ## Conventional Commits
 
 All commit messages MUST follow the Conventional Commits specification.

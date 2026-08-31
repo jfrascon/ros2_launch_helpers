@@ -251,8 +251,7 @@ def test_render_params_file_action_renders_substitutions_and_updates_launch_cont
     ctx.launch_configurations['robot_prefix'] = 'robot_1_'
 
     result = rlh.RenderParamsFile(
-        params_file=LaunchConfiguration('params_file'),
-        output_context_key='params_file',
+        params_file=LaunchConfiguration('params_file'), output_context_key='params_file'
     ).execute(ctx)
 
     assert result is None
@@ -272,8 +271,7 @@ def test_render_params_file_action_can_write_to_separate_output_context_key(tmp_
     ctx.launch_configurations['params_file'] = str(source_path)
 
     result = rlh.RenderParamsFile(
-        params_file=LaunchConfiguration('params_file'),
-        output_context_key='resolved_params_file',
+        params_file=LaunchConfiguration('params_file'), output_context_key='resolved_params_file'
     ).execute(ctx)
 
     assert result is None
@@ -291,8 +289,7 @@ def test_render_params_file_action_accepts_path_join_substitution(tmp_path):
     ctx = LaunchContext()
 
     result = rlh.RenderParamsFile(
-        params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']),
-        output_context_key='resolved_params_file',
+        params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']), output_context_key='resolved_params_file'
     ).execute(ctx)
 
     assert result is None
@@ -341,10 +338,9 @@ def test_render_params_file_action_requires_resolved_filesystem_path(tmp_path):
     ctx.launch_configurations['params_file'] = f'file://{source_path}'
 
     with pytest.raises(FileNotFoundError, match='Params file'):
-        rlh.RenderParamsFile(
-            params_file=LaunchConfiguration('params_file'),
-            output_context_key='params_file',
-        ).execute(ctx)
+        rlh.RenderParamsFile(params_file=LaunchConfiguration('params_file'), output_context_key='params_file').execute(
+            ctx
+        )
 
 
 def test_actions_accept_condition():

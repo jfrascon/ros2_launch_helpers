@@ -8,7 +8,6 @@ for each resolution failure that callers may want to handle differently.
 from pathlib import Path
 
 import pytest
-
 import ros2_launch_helpers as rlh
 import ros2_launch_helpers.helpers as helpers
 

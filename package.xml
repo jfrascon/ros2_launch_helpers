@@ -4,7 +4,7 @@
   <name>ros2_launch_helpers</name>
   <version>1.0.0</version>
   <description>
-    Helpers to standardize ROS 2 launch configuration: parameter overlays, launch action arguments, and CLI overrides.
+    Helpers for ROS 2 launch files: parameter rendering, action arguments, and namespace handling.
   </description>
   <maintainer email="jfracon@gmail.com">Juan Francisco Rascon Crespo</maintainer>
   <license>Apache-2.0</license>
@@ -16,10 +16,8 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>python3-setuptools</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
 
-  <test_depend>ament_copyright</test_depend>
-  <test_depend>ament_flake8</test_depend>
-  <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
   <export>

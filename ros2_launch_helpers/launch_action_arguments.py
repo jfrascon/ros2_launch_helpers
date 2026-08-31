@@ -72,8 +72,8 @@ _NODE_KNOWN_ARGUMENTS = _EXECUTE_PROCESS_KNOWN_ARGUMENTS | _NODE_DECLARED_ARGUME
 
 # Rejected arguments are not allowed to be set through this helper.
 # They are still valid constructor arguments, but this helper does not allow users to pass them
-# through resolved action arguments, because they define what is launched, and the launch file should
-# keep them visible.
+# through resolved action arguments, because they define what is launched.
+# The launch file should keep them visible.
 _ACTION_REJECTED_ARGUMENTS = {'condition'}
 _EXECUTE_LOCAL_REJECTED_ARGUMENTS = _ACTION_REJECTED_ARGUMENTS | {'process_description', 'on_exit'}
 _EXECUTE_PROCESS_REJECTED_ARGUMENTS = _EXECUTE_LOCAL_REJECTED_ARGUMENTS | {'cmd'}
@@ -270,14 +270,6 @@ def _resolve_action_arguments(
     if unknown_extra_rejected_arguments:
         raise ValueError(f'rejected launch action arguments are not known: {sorted(unknown_extra_rejected_arguments)}')
 
-    # The module-owned rejected set is checked separately. If this fails, the bug is in this module,
-    # not in caller input.
-    unknown_rejected_arguments = rejected_arguments - known_arguments
-    if unknown_rejected_arguments:
-        raise ValueError(
-            f'internal rejected launch action arguments are not known: {sorted(unknown_rejected_arguments)}'
-        )
-
     # total_rejected_arguments is the complete policy used to validate defaults and JSON values.
     total_rejected_arguments = rejected_arguments | extra_rejected_arguments
 
@@ -340,7 +332,8 @@ def _resolve_argument_dict(
     Validate and resolve every field in an argument dictionary.
 
     Both default arguments and JSON values pass through this function.
-    This keeps the security policy in one place and prevents defaults from bypassing rejected fields.
+    This keeps the security policy in one place.
+    It also prevents defaults from bypassing rejected fields.
     `copy_resolved_mutable_values` exists because default arguments and JSON values have different
     ownership.
     Default arguments are Python objects that the launch file may keep and reuse, so their
@@ -380,8 +373,8 @@ def _copy_resolved_mutable_value(argument_value: object) -> object:
     Return a shallow copy when the caller asks to detach a resolved mutable value.
 
     Resolvers only produce simple launch-compatible values. A shallow copy is enough for the mutable
-    containers supported by this module: ``dict[str, str]`` and ``list[str]``. Remappings are already
-    rebuilt as a new list of tuple pairs by ``resolve_remappings``.
+    containers supported by this module: ``dict[str, str]`` and ``list[str]``.
+    Remappings are already rebuilt as a new list of tuple pairs by ``resolve_remappings``.
     """
     if isinstance(argument_value, dict):
         return dict(argument_value)
