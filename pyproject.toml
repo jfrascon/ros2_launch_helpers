@@ -5,7 +5,9 @@
 # All settings related to how Ruff analyzes and formats your code go under this table.
 [tool.ruff]
 line-length = 120
-src = []
+# Ruff searches the project root and its src directory by default. Set this only when a project
+# uses different Python source roots, for example:
+# src = ["src/my_python_pkg", "tests"]
 
 [tool.ruff.format]
 # Use single quotes for ordinary strings
@@ -66,12 +68,12 @@ docstring-quotes = "double"
 # multiline-quotes = "single"
 
 [tool.ruff.lint.isort]
-no-lines-before = []
 split-on-trailing-comma = false
+# Set this when you want specific import sections to stay adjacent instead of separated by
+# blank lines.
+# Common values: "future", "standard-library", "third-party", "first-party", "local-folder".
+no-lines-before = []
 
-# ------------------------------------------------------------------------------
-# PyTest configuration (opcional)
-# ------------------------------------------------------------------------------
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]

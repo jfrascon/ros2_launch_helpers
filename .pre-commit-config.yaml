@@ -33,7 +33,7 @@ repos:
       - id: check-shebang-scripts-are-executable
       - id: check-symlinks
       - id: check-yaml
-        exclude: '(^|/)\.clang-format$'
+        exclude: (^|/)\.clang-format$
       - id: check-json
       - id: check-xml
       - id: check-toml
@@ -53,7 +53,7 @@ repos:
   # Python hooks
   # Ruff replaces both Black (formatter) and isort (import sorting).
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.21
+    rev: v0.16.5
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -78,7 +78,7 @@ repos:
 
   # CPP hooks
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v22.1.8
+    rev: v23.1.0
     hooks:
       - id: clang-format
         # .c: C.
@@ -108,7 +108,13 @@ repos:
         entry: ament_cpplint
         language: system
         files: '\.(h\+\+|h|hh|hxx|hpp|cuh|c|cc|cpp|cu|c\+\+|cxx|tpp|txx)$'
-        args: ["--linelength=120", "--filter=-whitespace/newline,-build/include_order,-runtime/indentation_namespace,-legal/copyright"]
+        args:
+          - --linelength=120
+          # Disable whitespace/newline because it conflicts with the configured brace layout.
+          # Disable build/include_order because .clang-format preserves the include order.
+          # Disable runtime/indentation_namespace because .clang-format controls that layout.
+          # Disable legal/copyright because the project has no copyright header policy.
+          - --filters=-whitespace/newline,-build/include_order,-runtime/indentation_namespace,-legal/copyright
 
       - id: ament_lint_cmake
         name: ament_lint_cmake
@@ -133,7 +139,7 @@ repos:
         args: [-w, -s, -i=4]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.11.0.1
+    rev: v0.11.0.1-1
     hooks:
       # ShellCheck may report many warnings in legacy scripts, but it catches real bugs.
       # Prefer justified local suppressions over disabling the hook; for example,
