@@ -6,8 +6,9 @@ and writes the rendered YAML to the requested output path.
 """
 
 import pytest
-import ros2_launch_helpers as rlh
 from launch import LaunchContext
+
+import ros2_launch_helpers as rlh
 
 
 def test_render_params_file_renders_substitutions_to_output_path(tmp_path):

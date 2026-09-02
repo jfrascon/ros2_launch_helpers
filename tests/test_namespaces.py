@@ -3,8 +3,9 @@ Test namespace helper functions.
 """
 
 import pytest
-import ros2_launch_helpers as rlh
 from rclpy.exceptions import InvalidNamespaceException
+
+import ros2_launch_helpers as rlh
 
 
 @pytest.mark.parametrize('namespace', ['', '/', 'robot', '/robot', 'robot/front', '/robot/front'])

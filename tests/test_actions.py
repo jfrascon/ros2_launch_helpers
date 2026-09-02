@@ -5,10 +5,11 @@ Test launch actions exposed by ros2_launch_helpers.
 from pathlib import Path
 
 import pytest
-import ros2_launch_helpers as rlh
 from launch import LaunchContext
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution
+
+import ros2_launch_helpers as rlh
 
 
 def test_set_global_namespace_action_updates_launch_context():

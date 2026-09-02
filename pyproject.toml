@@ -5,9 +5,9 @@
 # All settings related to how Ruff analyzes and formats your code go under this table.
 [tool.ruff]
 line-length = 120
-# Ruff searches the project root and its src directory by default. Set this only when a project
-# uses different Python source roots, for example:
-# src = ["src/my_python_pkg", "tests"]
+# Treat modules below the repository root and its "src" directory as first-party.
+# These are Ruff's default source roots, declared explicitly for clarity.
+src = [".", "src"]
 
 [tool.ruff.format]
 # Use single quotes for ordinary strings

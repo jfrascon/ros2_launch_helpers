@@ -6,8 +6,9 @@ exception types for the main failure modes that callers may want to handle diffe
 """
 
 import pytest
-import ros2_launch_helpers as rlh
 import yaml
+
+import ros2_launch_helpers as rlh
 
 
 def test_read_yaml_file_allows_empty_yaml_data(tmp_path):
