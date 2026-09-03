@@ -33,25 +33,31 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    return LaunchDescription([
-        DeclareLaunchArgument('namespace', default_value=''),
-        DeclareLaunchArgument('robot_name', default_value='robot_1'),
-        DeclareLaunchArgument('params_file'),
-        DeclareLaunchArgument('params_file_allow_substs', default_value='true'),
-        rlh.SetGlobalNamespace(namespace=LaunchConfiguration('namespace'), output_context_key='namespace'),
-        rlh.SetRobotNamespace(
-            namespace=LaunchConfiguration('namespace'),
-            robot_name=LaunchConfiguration('robot_name'),
-            output_context_key='robot_namespace',
-        ),
-        rlh.SetRobotPrefix(robot_name=LaunchConfiguration('robot_name'), output_context_key='robot_prefix'),
-        rlh.RequireFile(path=LaunchConfiguration('params_file')),
-        rlh.RenderParamsFile(
-            params_file=LaunchConfiguration('params_file'),
-            output_context_key='params_file',
-            condition=IfCondition(LaunchConfiguration('params_file_allow_substs')),
-        ),
-    ])
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument('namespace', default_value=''),
+            DeclareLaunchArgument('robot_name', default_value='robot_1'),
+            DeclareLaunchArgument('params_file'),
+            DeclareLaunchArgument('params_file_allow_substs', default_value='true'),
+            rlh.SetGlobalNamespace(
+                namespace=LaunchConfiguration('namespace'), output_context_key='namespace'
+            ),
+            rlh.SetRobotNamespace(
+                namespace=LaunchConfiguration('namespace'),
+                robot_name=LaunchConfiguration('robot_name'),
+                output_context_key='robot_namespace',
+            ),
+            rlh.SetRobotPrefix(
+                robot_name=LaunchConfiguration('robot_name'), output_context_key='robot_prefix'
+            ),
+            rlh.RequireFile(path=LaunchConfiguration('params_file')),
+            rlh.RenderParamsFile(
+                params_file=LaunchConfiguration('params_file'),
+                output_context_key='params_file',
+                condition=IfCondition(LaunchConfiguration('params_file_allow_substs')),
+            ),
+        ]
+    )
 ```
 
 Action inputs accept normal ROS 2 launch substitutions.
@@ -111,11 +117,7 @@ from launch_ros.actions import Node
 def launch_setup(ctx):
     bridge_arguments = rlh.resolve_node_arguments(
         LaunchConfiguration('bridge_arguments_json_str').perform(ctx),
-        default_arguments={
-            'name': 'bridge',
-            'output': 'screen',
-            'emulate_tty': True,
-        },
+        default_arguments={'name': 'bridge', 'output': 'screen', 'emulate_tty': True},
     )
 
     return [
@@ -129,15 +131,17 @@ def launch_setup(ctx):
 
 
 def generate_launch_description():
-    return LaunchDescription([
-        DeclareLaunchArgument('robot_namespace', default_value=''),
-        DeclareLaunchArgument(
-            'bridge_arguments_json_str',
-            default_value=rlh.default_launch_action_arguments_json_str(),
-            description=rlh.LAUNCH_ACTION_ARGUMENTS_DESC,
-        ),
-        OpaqueFunction(function=launch_setup),
-    ])
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument('robot_namespace', default_value=''),
+            DeclareLaunchArgument(
+                'bridge_arguments_json_str',
+                default_value=rlh.default_launch_action_arguments_json_str(),
+                description=rlh.LAUNCH_ACTION_ARGUMENTS_DESC,
+            ),
+            OpaqueFunction(function=launch_setup),
+        ]
+    )
 ```
 
 The helper applies no global `default_arguments`.
@@ -269,3 +273,8 @@ When arguments are passed directly to `ExecuteProcess`, `name` is the launch pro
 - When a launch file should accept optional launch action arguments without declaring one launch argument per action argument.
 - When parent launch files should be able to pass process arguments or remappings to included launch files.
 - When a launch file creates one or more actions and needs processed arguments in the shape expected by ROS 2 launch.
+
+## License
+
+This package is distributed under the Apache License 2.0.
+See [LICENSE](LICENSE) for the complete terms.
