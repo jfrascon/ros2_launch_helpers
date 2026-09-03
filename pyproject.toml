@@ -4,7 +4,7 @@
 # This section configures Ruff, a high-performance Python linter and formatter.
 # All settings related to how Ruff analyzes and formats your code go under this table.
 [tool.ruff]
-line-length = 120
+line-length = 100
 # Treat modules below the repository root and its "src" directory as first-party.
 # These are Ruff's default source roots, declared explicitly for clarity.
 src = [".", "src"]
@@ -27,20 +27,16 @@ line-ending = "lf"
 # defined set of standards for the project.
 #
 # The selected rule sets are:
-#   - E:  pycodestyle Errors. These are important style violations from PEP 8,
-#           like indentation errors or incorrect spacing around operators.
-#   - W:  pycodestyle Warnings. These are less critical style violations from
-#           PEP 8, like trailing whitespace or blank lines.
-#   - F:  Pyflakes rules. These are crucial for catching LOGICAL ERRORS in code,
-#           such as unused imports, undefined variables, or variables that are
-#           defined but never used. This is one of the most valuable rule sets.
-#   - Q:  flake8-quotes rules. This set is specifically for enforcing a
-#           consistent quote style (single vs. double quotes) in your code.
-#   - B:  likely bugs / bad practices             (flake8-bugbear)
-#   - C4: redundant comprehensions simplification (flake8-comprehensions)
-#   - I:  import sorting                          (isort rules, Ruff-native)
-#   - UP: upgrade syntax to newer Python          (pyupgrade)
-select = ["E", "W", "F", "Q", "B", "C4", "I"]
+# - B: flake8-bugbear rules detect likely bugs and error-prone practices.
+# - C4: flake8-comprehensions rules simplify unnecessary comprehensions.
+# - E: pycodestyle errors detect important PEP 8 violations.
+# - F: Pyflakes rules detect undefined names, unused imports, and related errors.
+# - I: Ruff's isort-compatible rules organize imports.
+# - Q: flake8-quotes rules enforce the quote policy configured below.
+# - W: pycodestyle warnings detect less severe PEP 8 violations.
+#
+# UP is not selected. It needs an explicit minimum Python target before syntax can be modernized.
+select = ["B", "C4", "E", "F", "I", "Q", "W"]
 
 # Ignore PEP 8 slice-spacing clash with Black (still flagged by pycodestyle)
 extend-ignore = ["E203"]
@@ -62,12 +58,25 @@ inline-quotes = "single"
 # Possible values: "single", "double".
 docstring-quotes = "double"
 
-# Note: You could also set `multiline-quotes` to control the quote style for
-# non-docstring, multi-line strings. If unset, it typically defaults to the
-# style of `inline-quotes`. For example:
-# multiline-quotes = "single"
+# Use triple double quotes for multiline strings so the formatter and linter agree.
+multiline-quotes = "double"
+# Keep the other quote style when it avoids inserting a backslash escape.
+avoid-escape = true
 
 [tool.ruff.lint.isort]
+# Match Ruff's import ordering to the Google style enforced by ament_flake8.
+# Sort imports by module name without prioritizing import statements over from statements.
+force-sort-within-sections = true
+# Place external dependencies before first-party imports, as required by the Google style.
+section-order = [
+  "future",
+  "standard-library",
+  "third-party",
+  "first-party",
+  "local-folder",
+]
+# Sort imported names alphabetically instead of grouping names by capitalization.
+order-by-type = false
 split-on-trailing-comma = false
 # Set this when you want specific import sections to stay adjacent instead of separated by
 # blank lines.

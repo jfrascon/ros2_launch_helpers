@@ -1,13 +1,11 @@
-"""
-Test launch actions exposed by ros2_launch_helpers.
-"""
+"""Test launch actions exposed by ros2_launch_helpers."""
 
 from pathlib import Path
 
-import pytest
 from launch import LaunchContext
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution
+import pytest
 
 import ros2_launch_helpers as rlh
 
@@ -16,9 +14,9 @@ def test_set_global_namespace_action_updates_launch_context():
     ctx = LaunchContext()
     ctx.launch_configurations['namespace'] = 'robots/front'
 
-    result = rlh.SetGlobalNamespace(namespace=LaunchConfiguration('namespace'), output_context_key='namespace').execute(
-        ctx
-    )
+    result = rlh.SetGlobalNamespace(
+        namespace=LaunchConfiguration('namespace'), output_context_key='namespace'
+    ).execute(ctx)
 
     assert result is None
     assert ctx.launch_configurations['namespace'] == '/robots/front'
@@ -39,7 +37,9 @@ def test_set_global_namespace_action_accepts_launch_configuration_input():
 def test_set_global_namespace_action_accepts_literal_input():
     ctx = LaunchContext()
 
-    result = rlh.SetGlobalNamespace(namespace='robots/front', output_context_key='global_namespace').execute(ctx)
+    result = rlh.SetGlobalNamespace(
+        namespace='robots/front', output_context_key='global_namespace'
+    ).execute(ctx)
 
     assert result is None
     assert ctx.launch_configurations['global_namespace'] == '/robots/front'
@@ -61,7 +61,10 @@ def test_set_global_namespace_action_accepts_substitution_output_context_key():
     ('action_type', 'kwargs'),
     [
         (rlh.SetGlobalNamespace, {'namespace': 'robots/front', 'output_context_key': ''}),
-        (rlh.SetRobotNamespace, {'namespace': '/robots', 'robot_name': 'front', 'output_context_key': ''}),
+        (
+            rlh.SetRobotNamespace,
+            {'namespace': '/robots', 'robot_name': 'front', 'output_context_key': ''},
+        ),
         (rlh.SetRobotPrefix, {'robot_name': 'front', 'output_context_key': ''}),
     ],
 )
@@ -118,7 +121,9 @@ def test_set_robot_namespace_action_accepts_substitution_output_context_key():
     ctx.launch_configurations['output_context_key'] = 'target_namespace'
 
     result = rlh.SetRobotNamespace(
-        namespace='/robots', robot_name='front', output_context_key=LaunchConfiguration('output_context_key')
+        namespace='/robots',
+        robot_name='front',
+        output_context_key=LaunchConfiguration('output_context_key'),
     ).execute(ctx)
 
     assert result is None
@@ -244,7 +249,8 @@ def test_require_file_rejects_missing_path(tmp_path):
 def test_render_params_file_action_renders_substitutions_and_updates_launch_context(tmp_path):
     source_path = tmp_path.joinpath('source.yaml')
     source_path.write_text(
-        '/**/node:\n  ros__parameters:\n    frame_id: $(var robot_prefix)base_link\n', encoding='utf-8'
+        '/**/node:\n  ros__parameters:\n    frame_id: $(var robot_prefix)base_link\n',
+        encoding='utf-8',
     )
 
     ctx = LaunchContext()
@@ -290,7 +296,8 @@ def test_render_params_file_action_accepts_path_join_substitution(tmp_path):
     ctx = LaunchContext()
 
     result = rlh.RenderParamsFile(
-        params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']), output_context_key='resolved_params_file'
+        params_file=PathJoinSubstitution([str(tmp_path), 'source.yaml']),
+        output_context_key='resolved_params_file',
     ).execute(ctx)
 
     assert result is None
@@ -339,16 +346,18 @@ def test_render_params_file_action_requires_resolved_filesystem_path(tmp_path):
     ctx.launch_configurations['params_file'] = f'file://{source_path}'
 
     with pytest.raises(FileNotFoundError, match='Params file'):
-        rlh.RenderParamsFile(params_file=LaunchConfiguration('params_file'), output_context_key='params_file').execute(
-            ctx
-        )
+        rlh.RenderParamsFile(
+            params_file=LaunchConfiguration('params_file'), output_context_key='params_file'
+        ).execute(ctx)
 
 
 def test_actions_accept_condition():
     condition = IfCondition(LaunchConfiguration('enabled'))
 
     action = rlh.SetRobotPrefix(
-        robot_name=LaunchConfiguration('robot_name'), output_context_key='robot_prefix', condition=condition
+        robot_name=LaunchConfiguration('robot_name'),
+        output_context_key='robot_prefix',
+        condition=condition,
     )
 
     assert action.condition is condition
@@ -381,7 +390,9 @@ def test_actions_accept_condition():
         ),
     ],
 )
-def test_actions_accept_generic_substitutions(action_type, kwargs, output_context_key, expected_value):
+def test_actions_accept_generic_substitutions(
+    action_type, kwargs, output_context_key, expected_value
+):
     ctx = LaunchContext()
 
     result = action_type(**kwargs).execute(ctx)

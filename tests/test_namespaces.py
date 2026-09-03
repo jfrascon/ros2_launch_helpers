@@ -1,6 +1,4 @@
-"""
-Test namespace helper functions.
-"""
+"""Test namespace helper functions."""
 
 import pytest
 from rclpy.exceptions import InvalidNamespaceException
@@ -95,7 +93,9 @@ def test_namespace_separator_helpers_transform_valid_namespaces():
 
 @pytest.mark.parametrize('new_sep', [None, '', '//'])
 @pytest.mark.parametrize('namespace', ['', '/', '/fleet/robot'])
-def test_namespace_separator_helpers_reject_invalid_replacement_for_every_namespace(namespace, new_sep):
+def test_namespace_separator_helpers_reject_invalid_replacement_for_every_namespace(
+    namespace, new_sep
+):
     with pytest.raises(ValueError, match='single character'):
         rlh.flatten_namespace(namespace, new_sep)
 

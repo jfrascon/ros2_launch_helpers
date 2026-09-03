@@ -21,8 +21,7 @@ class Node(ExecuteProcess):
         ros_arguments: Optional[Iterable[SomeSubstitutionsType]] = None,
         arguments: Optional[Iterable[SomeSubstitutionsType]] = None,
         **kwargs,
-    ) -> None:
-        ...
+    ) -> None: ...
 ```
 
 `Node` inherits from `launch.actions.ExecuteProcess`. That means a `Node` can also receive the fields accepted by `ExecuteProcess`. `ExecuteProcess` inherits from `launch.actions.ExecuteLocal`. That means a `Node` can also receive the fields accepted by `ExecuteLocal`.
@@ -39,8 +38,7 @@ class ExecuteProcess(ExecuteLocal):
         env: Optional[Dict[SomeSubstitutionsType, SomeSubstitutionsType]] = None,
         additional_env: Optional[Dict[SomeSubstitutionsType, SomeSubstitutionsType]] = None,
         **kwargs,
-    ) -> None:
-        ...
+    ) -> None: ...
 ```
 
 `ExecuteLocal` adds fields that control how the process is executed on the local machine. These fields control things such as shell usage, termination timeouts, output handling, command logging, exit handlers, and respawn behavior.
@@ -52,25 +50,24 @@ class ExecuteLocal(Action):
         *,
         process_description: Executable,
         shell: bool = False,
-        sigterm_timeout: SomeSubstitutionsType = LaunchConfiguration(
-            'sigterm_timeout', default=5),
-        sigkill_timeout: SomeSubstitutionsType = LaunchConfiguration(
-            'sigkill_timeout', default=5),
+        sigterm_timeout: SomeSubstitutionsType = LaunchConfiguration('sigterm_timeout', default=5),
+        sigkill_timeout: SomeSubstitutionsType = LaunchConfiguration('sigkill_timeout', default=5),
         emulate_tty: bool = False,
         output: SomeSubstitutionsType = 'log',
         output_format: Text = '[{this.process_description.final_name}] {line}',
         cached_output: bool = False,
         log_cmd: bool = False,
-        on_exit: Optional[Union[
-            SomeEntitiesType,
-            Callable[[ProcessExited, LaunchContext], Optional[SomeEntitiesType]],
-        ]] = None,
+        on_exit: Optional[
+            Union[
+                SomeEntitiesType,
+                Callable[[ProcessExited, LaunchContext], Optional[SomeEntitiesType]],
+            ]
+        ] = None,
         respawn: bool = False,
         respawn_delay: Optional[float] = None,
         respawn_max_retries: int = -1,
         **kwargs,
-    ) -> None:
-        ...
+    ) -> None: ...
 ```
 
 The important consequence is simple: when a launch file creates a `Node`, the launch file author is not only choosing values for the `Node` constructor. The author is also deciding which fields from `ExecuteProcess` and `ExecuteLocal` can be configured by the user of that launch file.
@@ -115,7 +112,7 @@ The chosen design is strict, but only inside a clear boundary. The helper suppor
 
 The default launch argument value is:
 
-```python
+```text
 default_launch_action_arguments_json_str() -> str
 ```
 
@@ -131,7 +128,7 @@ Use it as the `description` value when declaring an action-specific argument suc
 
 The parser helper names are:
 
-```python
+```text
 resolve_execute_local_arguments(
     json_str_arguments: str | None,
     default_arguments: dict[str, Any] | None = None,
@@ -171,11 +168,7 @@ Example usage:
 ```python
 bridge_arguments = rlh.resolve_node_arguments(
     LaunchConfiguration('bridge_arguments_json_str').perform(context),
-    default_arguments={
-        'name': 'bridge',
-        'output': 'screen',
-        'emulate_tty': True,
-    },
+    default_arguments={'name': 'bridge', 'output': 'screen', 'emulate_tty': True},
 )
 
 Node(
@@ -230,12 +223,7 @@ The supported field list is based on the ROS 2 Jazzy Python files that define th
 ROS 2 Jazzy defines `SomeSubstitutionsType` as:
 
 ```python
-SomeSubstitutionsType = Union[
-    Text,
-    Path,
-    Substitution,
-    Iterable[Union[Text, Path, Substitution]],
-]
+SomeSubstitutionsType = Union[Text, Path, Substitution, Iterable[Union[Text, Path, Substitution]]]
 ```
 
 JSON cannot represent Python `Path` objects. JSON also cannot represent ROS 2 launch `Substitution` objects such as `LaunchConfiguration` or `FindPackageShare`. For fields typed as `SomeSubstitutionsType`, this helper supports only the part that can be written naturally in JSON. `default_arguments` follows the same rule so that defaults and JSON values use the same validation path:
@@ -307,11 +295,7 @@ If a launch file needs those objects, it should create them in Python. The launc
 When arguments are passed to `Node`, `name` means the ROS node name:
 
 ```python
-Node(
-    package='demo_nodes_cpp',
-    executable='talker',
-    **{'name': 'talker'},
-)
+Node(package='demo_nodes_cpp', executable='talker', **{'name': 'talker'})
 ```
 
 When arguments are passed to `Node`, `exec_name` means the launch process label. This is the name that launch uses for the process that is running the node. Internally, `Node` forwards `exec_name` as `ExecuteProcess.name`:
@@ -327,10 +311,7 @@ Node(
 When arguments are passed directly to `ExecuteProcess`, `name` means the launch process label. `ExecuteProcess` does not accept `exec_name`:
 
 ```python
-ExecuteProcess(
-    cmd=['gz', 'sim'],
-    **{'name': 'gazebo_process'},
-)
+ExecuteProcess(cmd=['gz', 'sim'], **{'name': 'gazebo_process'})
 ```
 
 This matches normal Python launch behavior. The helper does not translate `exec_name` into `name` for `ExecuteProcess`. If a user wants to configure an `ExecuteProcess` name, the JSON field is `name`, not `exec_name`.

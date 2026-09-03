@@ -1,6 +1,4 @@
-"""
-Test the project name-segment contract.
-"""
+"""Test the project name-segment contract."""
 
 import pytest
 

@@ -68,7 +68,9 @@ def test_resolve_file_resolves_package_uri_inside_package_share(monkeypatch, tmp
     config_path.parent.mkdir(parents=True)
     config_path.write_text('name: robot\n', encoding='utf-8')
 
-    monkeypatch.setattr(helpers, 'get_package_share_directory', lambda package_name: str(share_path))
+    monkeypatch.setattr(
+        helpers, 'get_package_share_directory', lambda package_name: str(share_path)
+    )
 
     resolved_file = rlh.resolve_file('package://robot_pkg/config/robot.yaml')
 
@@ -79,7 +81,9 @@ def test_resolve_file_rejects_package_uri_that_escapes_package_share(monkeypatch
     share_path = tmp_path.joinpath('share', 'robot_pkg')
     share_path.mkdir(parents=True)
 
-    monkeypatch.setattr(helpers, 'get_package_share_directory', lambda package_name: str(share_path))
+    monkeypatch.setattr(
+        helpers, 'get_package_share_directory', lambda package_name: str(share_path)
+    )
 
     with pytest.raises(rlh.InvalidFileUriPatternError, match='inside package share directory'):
         rlh.resolve_file('package://robot_pkg/../outside.yaml')

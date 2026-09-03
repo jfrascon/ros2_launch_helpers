@@ -2,10 +2,10 @@ import inspect
 import json
 import math
 
-import pytest
 from launch.action import Action
 from launch.actions import ExecuteLocal, ExecuteProcess
 from launch_ros.actions import Node
+import pytest
 
 import ros2_launch_helpers as rlh
 import ros2_launch_helpers.launch_action_arguments as launch_action_arguments
@@ -16,11 +16,15 @@ def _resolve_node(value, default_arguments=None):
 
 
 def _resolve_execute_process(value, default_arguments=None):
-    return rlh.resolve_execute_process_arguments(json.dumps(value), default_arguments=default_arguments)
+    return rlh.resolve_execute_process_arguments(
+        json.dumps(value), default_arguments=default_arguments
+    )
 
 
 def _resolve_execute_local(value, default_arguments=None):
-    return rlh.resolve_execute_local_arguments(json.dumps(value), default_arguments=default_arguments)
+    return rlh.resolve_execute_local_arguments(
+        json.dumps(value), default_arguments=default_arguments
+    )
 
 
 def _keyword_only_args(cls: type) -> set[str]:
@@ -46,8 +50,14 @@ def test_current_launch_action_arguments_api_is_exported():
 
 def test_ros2_action_constructor_arguments_are_still_known():
     assert _keyword_only_args(Action) == launch_action_arguments._ACTION_KNOWN_ARGUMENTS
-    assert _keyword_only_args(ExecuteLocal) == launch_action_arguments._EXECUTE_LOCAL_DECLARED_ARGUMENTS
-    assert _keyword_only_args(ExecuteProcess) == launch_action_arguments._EXECUTE_PROCESS_DECLARED_ARGUMENTS
+    assert (
+        _keyword_only_args(ExecuteLocal)
+        == launch_action_arguments._EXECUTE_LOCAL_DECLARED_ARGUMENTS
+    )
+    assert (
+        _keyword_only_args(ExecuteProcess)
+        == launch_action_arguments._EXECUTE_PROCESS_DECLARED_ARGUMENTS
+    )
     assert _keyword_only_args(Node) == launch_action_arguments._NODE_DECLARED_ARGUMENTS
 
 
@@ -60,9 +70,13 @@ def test_empty_launch_action_arguments_returns_empty_dictionary():
 def test_empty_launch_action_arguments_returns_default_arguments():
     default_arguments = {'name': 'bridge', 'output': 'screen'}
 
-    assert rlh.resolve_node_arguments(None, default_arguments=default_arguments) == default_arguments
+    assert (
+        rlh.resolve_node_arguments(None, default_arguments=default_arguments) == default_arguments
+    )
     assert rlh.resolve_node_arguments('', default_arguments=default_arguments) == default_arguments
-    assert rlh.resolve_node_arguments('{}', default_arguments=default_arguments) == default_arguments
+    assert (
+        rlh.resolve_node_arguments('{}', default_arguments=default_arguments) == default_arguments
+    )
 
 
 def test_resolve_node_arguments_merges_default_arguments_before_json_object():
@@ -114,10 +128,9 @@ def test_resolve_argument_dict_does_not_copy_mutable_values_when_not_requested()
 
 
 def test_json_null_overrides_default_arguments():
-    assert _resolve_node({'name': None}, default_arguments={'name': 'bridge', 'output': 'screen'}) == {
-        'name': None,
-        'output': 'screen',
-    }
+    assert _resolve_node(
+        {'name': None}, default_arguments={'name': 'bridge', 'output': 'screen'}
+    ) == {'name': None, 'output': 'screen'}
 
 
 def test_resolve_node_arguments_rejects_non_dictionary_default_arguments():
@@ -126,7 +139,9 @@ def test_resolve_node_arguments_rejects_non_dictionary_default_arguments():
 
 
 def test_resolve_node_arguments_resolves_default_argument_values():
-    assert rlh.resolve_node_arguments('{}', default_arguments={'respawn_delay': 2}) == {'respawn_delay': 2.0}
+    assert rlh.resolve_node_arguments('{}', default_arguments={'respawn_delay': 2}) == {
+        'respawn_delay': 2.0
+    }
 
 
 @pytest.mark.parametrize('field_name', ['package', 'executable', 'parameters'])
@@ -142,7 +157,9 @@ def test_resolve_node_arguments_rejects_unknown_default_arguments():
 
 def test_resolve_execute_process_arguments_rejects_node_default_arguments():
     with pytest.raises(ValueError, match='not supported'):
-        rlh.resolve_execute_process_arguments('{}', default_arguments={'ros_arguments': ['--log-level', 'debug']})
+        rlh.resolve_execute_process_arguments(
+            '{}', default_arguments={'ros_arguments': ['--log-level', 'debug']}
+        )
 
 
 def test_resolve_node_arguments_accepts_supported_node_fields():
@@ -315,7 +332,8 @@ def test_old_keyed_json_shape_is_rejected():
 
 
 @pytest.mark.parametrize(
-    'field_name', ['condition', 'process_description', 'on_exit', 'cmd', 'package', 'executable', 'parameters']
+    'field_name',
+    ['condition', 'process_description', 'on_exit', 'cmd', 'package', 'executable', 'parameters'],
 )
 def test_resolve_node_arguments_rejects_fields_that_belong_in_launch_file(field_name):
     with pytest.raises(ValueError, match='launch file'):
@@ -342,9 +360,15 @@ def test_resolve_node_arguments_rejects_non_set_extra_rejected_arguments():
         rlh.resolve_node_arguments('{}', extra_rejected_arguments=['respawn'])
 
 
-@pytest.mark.parametrize('extra_rejected_arguments', [{1}, {'not_a_launch_action_argument', 1}, {''}])
-def test_resolve_node_arguments_rejects_invalid_extra_rejected_argument_names(extra_rejected_arguments):
-    with pytest.raises(ValueError, match='extra_rejected_arguments must contain non-empty string argument names'):
+@pytest.mark.parametrize(
+    'extra_rejected_arguments', [{1}, {'not_a_launch_action_argument', 1}, {''}]
+)
+def test_resolve_node_arguments_rejects_invalid_extra_rejected_argument_names(
+    extra_rejected_arguments,
+):
+    with pytest.raises(
+        ValueError, match='extra_rejected_arguments must contain non-empty string argument names'
+    ):
         rlh.resolve_node_arguments('{}', extra_rejected_arguments=extra_rejected_arguments)
 
 
@@ -355,7 +379,16 @@ def test_resolve_node_arguments_rejects_unknown_fields():
 
 @pytest.mark.parametrize(
     'field_name',
-    ['namespace', 'exec_name', 'remappings', 'ros_arguments', 'arguments', 'package', 'executable', 'parameters'],
+    [
+        'namespace',
+        'exec_name',
+        'remappings',
+        'ros_arguments',
+        'arguments',
+        'package',
+        'executable',
+        'parameters',
+    ],
 )
 def test_resolve_execute_process_arguments_rejects_node_fields(field_name):
     with pytest.raises(ValueError, match='not supported'):
@@ -376,20 +409,33 @@ def test_resolve_execute_local_arguments_rejects_execute_process_fields(field_na
 
 @pytest.mark.parametrize(
     'field_name',
-    ['namespace', 'exec_name', 'remappings', 'ros_arguments', 'arguments', 'package', 'executable', 'parameters'],
+    [
+        'namespace',
+        'exec_name',
+        'remappings',
+        'ros_arguments',
+        'arguments',
+        'package',
+        'executable',
+        'parameters',
+    ],
 )
 def test_resolve_execute_local_arguments_rejects_node_fields(field_name):
     with pytest.raises(ValueError, match='not supported'):
         _resolve_execute_local({field_name: 'bad'})
 
 
-@pytest.mark.parametrize('field_name', ['shell', 'emulate_tty', 'cached_output', 'log_cmd', 'respawn'])
+@pytest.mark.parametrize(
+    'field_name', ['shell', 'emulate_tty', 'cached_output', 'log_cmd', 'respawn']
+)
 def test_bool_fields_reject_strings(field_name):
     with pytest.raises(ValueError, match='boolean'):
         _resolve_node({field_name: 'true'})
 
 
-@pytest.mark.parametrize('field_name', ['shell', 'emulate_tty', 'cached_output', 'log_cmd', 'respawn'])
+@pytest.mark.parametrize(
+    'field_name', ['shell', 'emulate_tty', 'cached_output', 'log_cmd', 'respawn']
+)
 def test_bool_fields_reject_null(field_name):
     with pytest.raises(ValueError, match='boolean'):
         _resolve_node({field_name: None})
@@ -407,7 +453,9 @@ def test_string_list_fields_reject_non_string_items(field_name):
         _resolve_node({field_name: [1]})
 
 
-@pytest.mark.parametrize('field_name', ['name', 'namespace', 'exec_name', 'prefix', 'cwd', 'sigterm_timeout', 'output'])
+@pytest.mark.parametrize(
+    'field_name', ['name', 'namespace', 'exec_name', 'prefix', 'cwd', 'sigterm_timeout', 'output']
+)
 def test_some_substitutions_type_fields_reject_non_strings_and_non_lists(field_name):
     with pytest.raises(ValueError, match='string or list of strings'):
         _resolve_node({field_name: 1})

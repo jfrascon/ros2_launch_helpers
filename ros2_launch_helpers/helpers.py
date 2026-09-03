@@ -2,18 +2,17 @@ import os
 from pathlib import Path
 from typing import Any, List, Literal, Optional, Tuple, Union
 
-import rclpy.validate_namespace
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext, LaunchDescriptionEntity
 from launch.actions import LogInfo
 from launch_ros.parameter_descriptions import ParameterFile
+import rclpy.validate_namespace
+import yaml
 
 
 class FileResolutionError(ValueError):
     """
-    Base exception raised when this module cannot convert a user-provided file value into a
-    filesystem path.
+    Report a file value that cannot be converted into a filesystem path.
 
     Callers can catch this class when they do not need to distinguish between an empty value, an
     invalid URI shape, or another file-resolution error reported by this module.
@@ -22,8 +21,9 @@ class FileResolutionError(ValueError):
 
 class NullFilePathError(FileResolutionError):
     """
-    Raised when a function needs a file path or URI, but the caller passed ``None`` or an empty
-    string.
+    Report a missing file path or URI.
+
+    This exception is raised when the caller passes ``None`` or an empty string.
     """
 
 
@@ -110,6 +110,7 @@ def make_robot_namespace(namespace: str, robot_name: str) -> str:
 def make_robot_prefix(robot_name: str) -> str:
     """
     Return the prefix derived from one robot name.
+
     This function is just a wrapper around ``to_prefix()`` with a more descriptive name for callers
     that want a prefix derived from a robot name.
 
@@ -174,7 +175,9 @@ def require_non_empty_mapping(data: Any) -> None:
         raise ValueError('Expected a non-empty mapping')
 
 
-def render_params_file(params_file: Union[str, Path], ctx: LaunchContext, output_path: Union[str, Path]) -> None:
+def render_params_file(
+    params_file: Union[str, Path], ctx: LaunchContext, output_path: Union[str, Path]
+) -> None:
     """
     Expand launch substitutions in one ROS parameter YAML file and write the rendered content.
 
@@ -264,17 +267,23 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
         rest = file[len('package://') :]
 
         if '/' not in rest:
-            raise InvalidFileUriPatternError(f"Package URI must be 'package://<package>/<path>' (got: '{file}')")
+            raise InvalidFileUriPatternError(
+                f"Package URI must be 'package://<package>/<path>' (got: '{file}')"
+            )
 
         pkg, relative_file = rest.split('/', 1)
 
         if not pkg or not relative_file:
-            raise InvalidFileUriPatternError(f"Package URI must be 'package://<package>/<path>' (got: '{file}')")
+            raise InvalidFileUriPatternError(
+                f"Package URI must be 'package://<package>/<path>' (got: '{file}')"
+            )
 
         try:
             parent_path = get_package_share_directory(pkg)
         except ValueError as e:
-            raise InvalidFileUriPatternError(f"Package URI contains an invalid package name (got: '{file}')") from e
+            raise InvalidFileUriPatternError(
+                f"Package URI contains an invalid package name (got: '{file}')"
+            ) from e
 
         parent_path = Path(parent_path).resolve()
         resolved_file = parent_path.joinpath(relative_file).resolve()
@@ -290,7 +299,9 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
         resolved_file = os.path.expanduser(file[len('file://') :])
 
         if not os.path.isabs(resolved_file):
-            raise InvalidFileUriPatternError(f"File URI must point to an absolute path (got: '{resolved_file}')")
+            raise InvalidFileUriPatternError(
+                f"File URI must point to an absolute path (got: '{resolved_file}')"
+            )
 
         return resolved_file
 

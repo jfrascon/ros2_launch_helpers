@@ -1,6 +1,4 @@
-"""
-Test package metadata that is visible to ROS and Python callers.
-"""
+"""Test package metadata that is visible to ROS and Python callers."""
 
 import ast
 from pathlib import Path
@@ -22,7 +20,9 @@ def test_python_public_version_matches_packaging_version():
         if keyword.arg == 'version' and isinstance(keyword.value, ast.Constant)
     )
 
-    package_xml_version = ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot().findtext('version')
+    package_xml_version = (
+        ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot().findtext('version')
+    )
 
     assert rlh.__version__ == setup_version == package_xml_version
 
@@ -36,7 +36,9 @@ def test_setup_and_package_xml_descriptions_match():
         if keyword.arg == 'description' and isinstance(keyword.value, ast.Constant)
     )
 
-    package_xml_description = ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot().findtext('description')
+    package_xml_description = (
+        ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot().findtext('description')
+    )
 
     assert setup_description == ' '.join(package_xml_description.split())
 
@@ -61,7 +63,7 @@ def test_package_xml_declares_only_registered_test_dependencies():
     package_xml_root = ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot()
     test_depends = {element.text for element in package_xml_root.findall('test_depend')}
 
-    assert test_depends == {'python3-pytest'}
+    assert test_depends == {'ament_flake8', 'ament_pep257', 'ament_xmllint', 'python3-pytest'}
 
 
 def test_current_name_helpers_are_exported():

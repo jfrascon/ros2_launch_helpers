@@ -10,12 +10,19 @@ from tempfile import NamedTemporaryFile
 
 from launch import Action, LaunchContext
 from launch.utilities import perform_substitutions
-from launch.utilities.type_utils import SomeSubstitutionsType, normalize_to_list_of_substitutions
+from launch.utilities.type_utils import normalize_to_list_of_substitutions, SomeSubstitutionsType
 
-from .helpers import make_namespace_absolute, make_robot_namespace, make_robot_prefix, render_params_file
+from .helpers import (
+    make_namespace_absolute,
+    make_robot_namespace,
+    make_robot_prefix,
+    render_params_file,
+)
 
 
-def _resolve_context_key(context: LaunchContext, key: SomeSubstitutionsType, argument_name: str) -> str:
+def _resolve_context_key(
+    context: LaunchContext, key: SomeSubstitutionsType, argument_name: str
+) -> str:
     resolved_key = perform_substitutions(context, normalize_to_list_of_substitutions(key))
 
     if not resolved_key:
@@ -25,9 +32,7 @@ def _resolve_context_key(context: LaunchContext, key: SomeSubstitutionsType, arg
 
 
 class RequireDirectory(Action):
-    """
-    Require a launch substitution to resolve to an existing directory.
-    """
+    """Require a launch substitution to resolve to an existing directory."""
 
     def __init__(self, path: SomeSubstitutionsType, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -42,13 +47,13 @@ class RequireDirectory(Action):
         path = Path(resolved_path)
 
         if not path.is_dir():
-            raise FileNotFoundError(f"Required directory '{path}' does not exist or is not a directory.")
+            raise FileNotFoundError(
+                f"Required directory '{path}' does not exist or is not a directory."
+            )
 
 
 class RequireFile(Action):
-    """
-    Require a launch substitution to resolve to an existing file.
-    """
+    """Require a launch substitution to resolve to an existing file."""
 
     def __init__(self, path: SomeSubstitutionsType, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -67,18 +72,23 @@ class RequireFile(Action):
 
 
 class RenderParamsFile(Action):
-    """
-    Render a resolved ROS params file and store the rendered path in a launch configuration.
-    """
+    """Render a params file and store its new path in a launch configuration."""
 
-    def __init__(self, params_file: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs) -> None:
+    def __init__(
+        self,
+        params_file: SomeSubstitutionsType,
+        output_context_key: SomeSubstitutionsType,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.params_file = normalize_to_list_of_substitutions(params_file)
         self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         params_file = perform_substitutions(context, self.params_file)
-        output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
+        output_context_key = _resolve_context_key(
+            context, self.output_context_key, 'output_context_key'
+        )
 
         if not Path(params_file).is_file():
             raise FileNotFoundError(f"Params file '{params_file}' does not exist.")
@@ -91,25 +101,25 @@ class RenderParamsFile(Action):
 
 
 class SetGlobalNamespace(Action):
-    """
-    Resolve one namespace value as an absolute namespace and store it in the launch context.
-    """
+    """Store one namespace as an absolute namespace in the launch context."""
 
-    def __init__(self, namespace: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs) -> None:
+    def __init__(
+        self, namespace: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.namespace = normalize_to_list_of_substitutions(namespace)
         self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         namespace = perform_substitutions(context, self.namespace)
-        output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
+        output_context_key = _resolve_context_key(
+            context, self.output_context_key, 'output_context_key'
+        )
         context.launch_configurations[output_context_key] = make_namespace_absolute(namespace)
 
 
 class SetRobotNamespace(Action):
-    """
-    Resolve a robot name inside a parent namespace and store the result in the launch context.
-    """
+    """Store a robot name inside a parent namespace in the launch context."""
 
     def __init__(
         self,
@@ -126,22 +136,28 @@ class SetRobotNamespace(Action):
     def execute(self, context: LaunchContext):
         namespace = perform_substitutions(context, self.namespace)
         robot_name = perform_substitutions(context, self.robot_name)
-        output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
+        output_context_key = _resolve_context_key(
+            context, self.output_context_key, 'output_context_key'
+        )
 
-        context.launch_configurations[output_context_key] = make_robot_namespace(namespace, robot_name)
+        context.launch_configurations[output_context_key] = make_robot_namespace(
+            namespace, robot_name
+        )
 
 
 class SetRobotPrefix(Action):
-    """
-    Convert a robot name value into a robot prefix launch configuration.
-    """
+    """Store a robot name as a robot prefix launch configuration."""
 
-    def __init__(self, robot_name: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs) -> None:
+    def __init__(
+        self, robot_name: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.robot_name = normalize_to_list_of_substitutions(robot_name)
         self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
 
     def execute(self, context: LaunchContext):
         robot_name = perform_substitutions(context, self.robot_name)
-        output_context_key = _resolve_context_key(context, self.output_context_key, 'output_context_key')
+        output_context_key = _resolve_context_key(
+            context, self.output_context_key, 'output_context_key'
+        )
         context.launch_configurations[output_context_key] = make_robot_prefix(robot_name)

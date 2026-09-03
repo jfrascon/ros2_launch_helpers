@@ -16,7 +16,7 @@ defaults are validated by the same policy and are overridden by values from the 
 
 import json
 import math
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple
 
 LAUNCH_ACTION_ARGUMENTS_DESC = (
     'JSON string containing supported arguments for one launch_ros.actions.Node, '
@@ -67,7 +67,9 @@ _NODE_DECLARED_ARGUMENTS = {
 # ExecuteProcess inherits from ExecuteLocal, and Node inherits from ExecuteProcess.
 # The KNOWN sets follow that inheritance chain.
 _EXECUTE_LOCAL_KNOWN_ARGUMENTS = _ACTION_KNOWN_ARGUMENTS | _EXECUTE_LOCAL_DECLARED_ARGUMENTS
-_EXECUTE_PROCESS_KNOWN_ARGUMENTS = _EXECUTE_LOCAL_KNOWN_ARGUMENTS | _EXECUTE_PROCESS_DECLARED_ARGUMENTS
+_EXECUTE_PROCESS_KNOWN_ARGUMENTS = (
+    _EXECUTE_LOCAL_KNOWN_ARGUMENTS | _EXECUTE_PROCESS_DECLARED_ARGUMENTS
+)
 _NODE_KNOWN_ARGUMENTS = _EXECUTE_PROCESS_KNOWN_ARGUMENTS | _NODE_DECLARED_ARGUMENTS
 
 # Rejected arguments are not allowed to be set through this helper.
@@ -77,14 +79,22 @@ _NODE_KNOWN_ARGUMENTS = _EXECUTE_PROCESS_KNOWN_ARGUMENTS | _NODE_DECLARED_ARGUME
 _ACTION_REJECTED_ARGUMENTS = {'condition'}
 _EXECUTE_LOCAL_REJECTED_ARGUMENTS = _ACTION_REJECTED_ARGUMENTS | {'process_description', 'on_exit'}
 _EXECUTE_PROCESS_REJECTED_ARGUMENTS = _EXECUTE_LOCAL_REJECTED_ARGUMENTS | {'cmd'}
-_NODE_REJECTED_ARGUMENTS = _EXECUTE_PROCESS_REJECTED_ARGUMENTS | {'executable', 'package', 'parameters'}
+_NODE_REJECTED_ARGUMENTS = _EXECUTE_PROCESS_REJECTED_ARGUMENTS | {
+    'executable',
+    'package',
+    'parameters',
+}
 
 # Allowed arguments are the KNOWN arguments minus the REJECTED arguments.
 # The REJECTED arguments are not allowed to be set through this helper, because they define what is
 # launched, and the launch file should keep them visible.
 # The ALLOWED arguments are the ones that can be set through this helper.
-_EXECUTE_LOCAL_ALLOWED_ARGUMENTS = _EXECUTE_LOCAL_KNOWN_ARGUMENTS - _EXECUTE_LOCAL_REJECTED_ARGUMENTS
-_EXECUTE_PROCESS_ALLOWED_ARGUMENTS = _EXECUTE_PROCESS_KNOWN_ARGUMENTS - _EXECUTE_PROCESS_REJECTED_ARGUMENTS
+_EXECUTE_LOCAL_ALLOWED_ARGUMENTS = (
+    _EXECUTE_LOCAL_KNOWN_ARGUMENTS - _EXECUTE_LOCAL_REJECTED_ARGUMENTS
+)
+_EXECUTE_PROCESS_ALLOWED_ARGUMENTS = (
+    _EXECUTE_PROCESS_KNOWN_ARGUMENTS - _EXECUTE_PROCESS_REJECTED_ARGUMENTS
+)
 _NODE_ALLOWED_ARGUMENTS = _NODE_KNOWN_ARGUMENTS - _NODE_REJECTED_ARGUMENTS
 
 
@@ -167,7 +177,9 @@ def resolve_node_arguments(
     )
 
 
-def resolve_remappings(argument_name: str, argument_value: object) -> Optional[List[Tuple[str, str]]]:
+def resolve_remappings(
+    argument_name: str, argument_value: object
+) -> Optional[List[Tuple[str, str]]]:
     """
     Convert remappings into the format expected by ROS 2 launch actions.
 
@@ -202,18 +214,23 @@ def resolve_remappings(argument_name: str, argument_value: object) -> Optional[L
 
     for index, remapping in enumerate(argument_value):
         if not isinstance(remapping, (list, tuple)) or len(remapping) != 2:
-            raise ValueError(f"launch action argument '{argument_name}' item {index} must be a two-item list or tuple")
+            raise ValueError(
+                f"launch action argument '{argument_name}' item {index} must be a "
+                'two-item list or tuple'
+            )
 
         original_name, new_name = remapping
 
         if not isinstance(original_name, str) or not original_name:
             raise ValueError(
-                f"launch action argument '{argument_name}' item {index} must have a non-empty string source"
+                f"launch action argument '{argument_name}' item {index} must have a "
+                'non-empty string source'
             )
 
         if not isinstance(new_name, str) or not new_name:
             raise ValueError(
-                f"launch action argument '{argument_name}' item {index} must have a non-empty string target"
+                f"launch action argument '{argument_name}' item {index} must have a "
+                'non-empty string target'
             )
 
         remappings.append((original_name, new_name))
@@ -247,7 +264,8 @@ def _resolve_action_arguments(
 
     if unknown_rejected_arguments:
         raise ValueError(
-            f'internal rejected launch action arguments are not known: {sorted(unknown_rejected_arguments)}'
+            'internal rejected launch action arguments are not known: '
+            f'{sorted(unknown_rejected_arguments)}'
         )
 
     # Additional fields can be rejected by the caller, if required for any reason.
@@ -261,14 +279,19 @@ def _resolve_action_arguments(
     # resolver.
     for argument_name in extra_rejected_arguments:
         if not isinstance(argument_name, str) or not argument_name:
-            raise ValueError('extra_rejected_arguments must contain non-empty string argument names')
+            raise ValueError(
+                'extra_rejected_arguments must contain non-empty string argument names'
+            )
 
     # A caller can only reject arguments that are known by the selected launch action resolver.
     # Rejecting an unknown name usually means a typo or a wrong resolver.
     unknown_extra_rejected_arguments = extra_rejected_arguments - known_arguments
 
     if unknown_extra_rejected_arguments:
-        raise ValueError(f'rejected launch action arguments are not known: {sorted(unknown_extra_rejected_arguments)}')
+        raise ValueError(
+            'rejected launch action arguments are not known: '
+            f'{sorted(unknown_extra_rejected_arguments)}'
+        )
 
     # total_rejected_arguments is the complete policy used to validate defaults and JSON values.
     total_rejected_arguments = rejected_arguments | extra_rejected_arguments
@@ -355,7 +378,8 @@ def _resolve_argument_dict(
         # Rejected means "this argument exists, but this helper intentionally keeps it in code".
         if argument_name in rejected_arguments:
             raise ValueError(
-                f"launch action argument '{argument_name}' is not allowed; set it directly in the launch file"
+                f"launch action argument '{argument_name}' is not allowed; "
+                'set it directly in the launch file'
             )
 
         resolved_argument_value = argument_resolver(argument_name, argument_value)
@@ -386,9 +410,7 @@ def _copy_resolved_mutable_value(argument_value: object) -> object:
 
 
 def _resolve_execute_local_argument(argument_name: str, argument_value: object) -> object:
-    """
-    Resolve one allowed argument declared by ``ExecuteLocal``.
-    """
+    """Resolve one allowed argument declared by ``ExecuteLocal``."""
     match argument_name:
         case 'shell' | 'emulate_tty' | 'cached_output' | 'log_cmd' | 'respawn':
             return _resolve_argument_bool(argument_name, argument_value)
@@ -405,9 +427,7 @@ def _resolve_execute_local_argument(argument_name: str, argument_value: object) 
 
 
 def _resolve_execute_process_argument(argument_name: str, argument_value: object) -> object:
-    """
-    Resolve one allowed argument declared by ``ExecuteProcess`` or inherited from ``ExecuteLocal``.
-    """
+    """Resolve an argument declared by ``ExecuteProcess`` or ``ExecuteLocal``."""
     match argument_name:
         case 'name' | 'prefix' | 'cwd':
             return _resolve_argument_optional_substitution(argument_name, argument_value)
@@ -418,9 +438,7 @@ def _resolve_execute_process_argument(argument_name: str, argument_value: object
 
 
 def _resolve_node_argument(argument_name: str, argument_value: object) -> object:
-    """
-    Resolve one allowed argument declared by ``Node`` or inherited from its base classes.
-    """
+    """Resolve an argument declared by ``Node`` or one of its base classes."""
     match argument_name:
         case 'namespace' | 'exec_name':
             return _resolve_argument_optional_substitution(argument_name, argument_value)
@@ -474,12 +492,16 @@ def _resolve_argument_string_list(
 
     for index, item in enumerate(argument_value):
         if not isinstance(item, str):
-            raise ValueError(f"launch action argument '{argument_name}' item {index} must be a string")
+            raise ValueError(
+                f"launch action argument '{argument_name}' item {index} must be a string"
+            )
 
     return cast(List[str], argument_value)
 
 
-def _resolve_argument_optional_string_dict(argument_name: str, argument_value: object) -> Optional[Dict[str, str]]:
+def _resolve_argument_optional_string_dict(
+    argument_name: str, argument_value: object
+) -> Optional[Dict[str, str]]:
     """
     Return one launch action argument as ``None`` or ``dict[str, str]``.
 
@@ -495,7 +517,9 @@ def _resolve_argument_optional_string_dict(argument_name: str, argument_value: o
 
     for env_key, env_value in argument_value.items():
         if not isinstance(env_key, str) or not env_key:
-            raise ValueError(f"launch action argument '{argument_name}' must have non-empty string keys")
+            raise ValueError(
+                f"launch action argument '{argument_name}' must have non-empty string keys"
+            )
 
         if not isinstance(env_value, str):
             raise ValueError(f"launch action argument '{argument_name}.{env_key}' must be a string")
@@ -523,7 +547,9 @@ def _resolve_argument_optional_float(argument_name: str, argument_value: object)
     return float(argument_value)
 
 
-def _resolve_argument_optional_string_list(argument_name: str, argument_value: object) -> Optional[List[str]]:
+def _resolve_argument_optional_string_list(
+    argument_name: str, argument_value: object
+) -> Optional[List[str]]:
     """
     Return one launch action argument as ``None`` or ``list[str]``.
 
@@ -537,7 +563,9 @@ def _resolve_argument_optional_string_list(argument_name: str, argument_value: o
     return _resolve_argument_string_list(argument_name, argument_value)
 
 
-def _resolve_argument_optional_substitution(argument_name: str, argument_value: object) -> Optional[str | List[str]]:
+def _resolve_argument_optional_substitution(
+    argument_name: str, argument_value: object
+) -> Optional[str | List[str]]:
     """
     Return one optional launch substitution argument.
 
