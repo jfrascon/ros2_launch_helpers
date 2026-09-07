@@ -17,7 +17,9 @@ def test_validate_namespace_rejects_non_string_values(namespace):
         rlh.validate_namespace(namespace)
 
 
-@pytest.mark.parametrize('namespace', ['robot/', '/robot/', 'robot//front', '1robot', 'robot-name'])
+@pytest.mark.parametrize(
+    'namespace', ['robot/', '/robot/', 'robot//front', '1robot', 'robot-name']
+)
 def test_validate_namespace_delegates_invalid_values_to_rclpy(namespace):
     with pytest.raises(InvalidNamespaceException):
         rlh.validate_namespace(namespace)

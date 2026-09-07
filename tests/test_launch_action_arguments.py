@@ -86,7 +86,11 @@ def test_resolve_node_arguments_merges_default_arguments_before_json_object():
         default_arguments={'name': 'bridge', 'output': 'screen', 'respawn': False},
     )
 
-    assert launch_action_arguments == {'name': 'custom_bridge', 'output': 'screen', 'respawn': True}
+    assert launch_action_arguments == {
+        'name': 'custom_bridge',
+        'output': 'screen',
+        'respawn': True,
+    }
 
 
 def test_resolve_node_arguments_copies_mutable_default_arguments():
@@ -202,9 +206,9 @@ def test_resolve_remappings_accepts_python_tuple_pairs():
 
 
 def test_resolve_node_arguments_accepts_python_tuple_remappings_in_default_arguments():
-    assert rlh.resolve_node_arguments('{}', default_arguments={'remappings': [('from', 'to')]}) == {
-        'remappings': [('from', 'to')]
-    }
+    assert rlh.resolve_node_arguments(
+        '{}', default_arguments={'remappings': [('from', 'to')]}
+    ) == {'remappings': [('from', 'to')]}
 
 
 def test_resolve_remappings_rejects_invalid_pairs():
@@ -348,7 +352,9 @@ def test_resolve_node_arguments_rejects_extra_rejected_arguments():
 
 def test_resolve_node_arguments_can_reject_namespace_as_extra_argument():
     with pytest.raises(ValueError, match='namespace'):
-        rlh.resolve_node_arguments('{"namespace": "robot"}', extra_rejected_arguments={'namespace'})
+        rlh.resolve_node_arguments(
+            '{"namespace": "robot"}', extra_rejected_arguments={'namespace'}
+        )
 
 
 def test_resolve_node_arguments_rejects_unknown_extra_rejected_arguments():

@@ -1,11 +1,7 @@
 import os
 from pathlib import Path
 from typing import Any
-from typing import List
 from typing import Literal
-from typing import Optional
-from typing import Tuple
-from typing import Union
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchContext
@@ -48,8 +44,8 @@ def flatten_namespace(namespace: str, new_sep: str) -> str:
 
     ``namespace`` can be empty, relative, or absolute.
     The ``namespace`` is validated before flattening.
-    The root namespace ``/`` and the empty namespace, ``''``, both return ``''`` because they do not
-    contain a concrete namespace segment.
+    The root namespace ``/`` and the empty namespace, ``''``, both return ``''`` because they do
+    not contain a concrete namespace segment.
     ``new_sep`` must be one character other than ``/`` so the result no longer contains namespace
     separators.
 
@@ -128,7 +124,7 @@ def make_robot_prefix(robot_name: str) -> str:
     return to_prefix(robot_name)
 
 
-def read_yaml_file(yaml_file: Optional[Union[str, Path]]) -> Tuple[str, Any]:
+def read_yaml_file(yaml_file: str | Path | None) -> tuple[str, Any]:
     """
     Resolve, read, and parse one YAML file.
 
@@ -182,7 +178,7 @@ def require_non_empty_mapping(data: Any) -> None:
 
 
 def render_params_file(
-    params_file: Union[str, Path], ctx: LaunchContext, output_path: Union[str, Path]
+    params_file: str | Path, ctx: LaunchContext, output_path: str | Path
 ) -> None:
     """
     Expand launch substitutions in one ROS parameter YAML file and write the rendered content.
@@ -247,7 +243,7 @@ def replace_separator_in_namespace(namespace: str, new_sep: str) -> str:
     return namespace.replace('/', new_sep)
 
 
-def resolve_file(file: Optional[Union[str, Path]]) -> str:
+def resolve_file(file: str | Path | None) -> str:
     """
     Convert one file value into a filesystem path string.
 
@@ -315,22 +311,23 @@ def resolve_file(file: Optional[Union[str, Path]]) -> str:
         scheme = file.split('://', 1)[0]
         raise InvalidFileUriPatternError(f"Unsupported file URI scheme '{scheme}' in '{file}'")
 
-    # If none of the special URI formats matched, return the original string with user expansion, if
-    # possible.
+    # If none of the special URI formats matched, return the original string with user expansion,
+    # if possible.
     return os.path.expanduser(file)
 
 
-def to_log_info_actions(messages: List[str]) -> List[LaunchDescriptionEntity]:
+def to_log_info_actions(messages: list[str]) -> list[LaunchDescriptionEntity]:
     """
     Convert text messages into ``LogInfo`` launch entities.
 
-    Each non-empty string in ``messages`` becomes one ``LogInfo`` action. Empty strings are ignored.
+    Each non-empty string in ``messages`` becomes one ``LogInfo`` action. Empty strings are
+    ignored.
     If ``messages`` is empty, the function returns an empty list.
     """
     if not messages:
         return []
 
-    entities: List[LaunchDescriptionEntity] = []
+    entities: list[LaunchDescriptionEntity] = []
 
     for msg in messages:
         if msg:

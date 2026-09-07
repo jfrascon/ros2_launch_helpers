@@ -149,7 +149,10 @@ class SetRobotPrefix(Action):
     """Store a robot name as a robot prefix launch configuration."""
 
     def __init__(
-        self, robot_name: SomeSubstitutionsType, output_context_key: SomeSubstitutionsType, **kwargs
+        self,
+        robot_name: SomeSubstitutionsType,
+        output_context_key: SomeSubstitutionsType,
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.robot_name = normalize_to_list_of_substitutions(robot_name)

@@ -159,7 +159,9 @@ def test_set_robot_prefix_action_accepts_launch_configuration_input():
 def test_set_robot_prefix_action_accepts_literal_input():
     ctx = LaunchContext()
 
-    result = rlh.SetRobotPrefix(robot_name='front', output_context_key='target_prefix').execute(ctx)
+    result = rlh.SetRobotPrefix(robot_name='front', output_context_key='target_prefix').execute(
+        ctx
+    )
 
     assert result is None
     assert ctx.launch_configurations['target_prefix'] == 'front_'
@@ -220,7 +222,9 @@ def test_require_file_accepts_existing_file_path_join_substitution(tmp_path):
 
     ctx = LaunchContext()
 
-    result = rlh.RequireFile(path=PathJoinSubstitution([str(tmp_path), 'params.yaml'])).execute(ctx)
+    result = rlh.RequireFile(path=PathJoinSubstitution([str(tmp_path), 'params.yaml'])).execute(
+        ctx
+    )
 
     assert result is None
 
@@ -370,7 +374,10 @@ def test_actions_accept_condition():
     [
         (
             rlh.SetGlobalNamespace,
-            {'namespace': TextSubstitution(text='robots/front'), 'output_context_key': 'namespace'},
+            {
+                'namespace': TextSubstitution(text='robots/front'),
+                'output_context_key': 'namespace',
+            },
             'namespace',
             '/robots/front',
         ),

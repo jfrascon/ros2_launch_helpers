@@ -1,8 +1,8 @@
 """
 Test ROS parameter file rendering.
 
-These tests verify that ros2_launch_helpers expands launch substitutions inside parameter YAML files
-and writes the rendered YAML to the requested output path.
+These tests verify that ros2_launch_helpers expands launch substitutions inside parameter YAML
+files and writes the rendered YAML to the requested output path.
 """
 
 from launch import LaunchContext

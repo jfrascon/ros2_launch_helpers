@@ -14,15 +14,11 @@ through one launch argument. Launch files can also provide Python `default_argum
 defaults are validated by the same policy and are overridden by values from the JSON object.
 """
 
+from collections.abc import Callable
 import json
 import math
 from typing import Any
-from typing import Callable
 from typing import cast
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Tuple
 
 LAUNCH_ACTION_ARGUMENTS_DESC = (
     'JSON string containing supported arguments for one launch_ros.actions.Node, '
@@ -116,10 +112,10 @@ def default_launch_action_arguments_json_str() -> str:
 
 
 def resolve_execute_local_arguments(
-    json_str_arguments: Optional[str],
-    default_arguments: Optional[Dict[str, Any]] = None,
-    extra_rejected_arguments: Optional[set[str]] = None,
-) -> Dict[str, Any]:
+    json_str_arguments: str | None,
+    default_arguments: dict[str, Any] | None = None,
+    extra_rejected_arguments: set[str] | None = None,
+) -> dict[str, Any]:
     """
     Resolve JSON and default arguments for an `ExecuteLocal` action.
 
@@ -138,10 +134,10 @@ def resolve_execute_local_arguments(
 
 
 def resolve_execute_process_arguments(
-    json_str_arguments: Optional[str],
-    default_arguments: Optional[Dict[str, Any]] = None,
-    extra_rejected_arguments: Optional[set[str]] = None,
-) -> Dict[str, Any]:
+    json_str_arguments: str | None,
+    default_arguments: dict[str, Any] | None = None,
+    extra_rejected_arguments: set[str] | None = None,
+) -> dict[str, Any]:
     """
     Resolve JSON and default arguments for an `ExecuteProcess` action.
 
@@ -161,10 +157,10 @@ def resolve_execute_process_arguments(
 
 
 def resolve_node_arguments(
-    json_str_arguments: Optional[str],
-    default_arguments: Optional[Dict[str, Any]] = None,
-    extra_rejected_arguments: Optional[set[str]] = None,
-) -> Dict[str, Any]:
+    json_str_arguments: str | None,
+    default_arguments: dict[str, Any] | None = None,
+    extra_rejected_arguments: set[str] | None = None,
+) -> dict[str, Any]:
     """
     Resolve JSON and default arguments for a `Node` action.
 
@@ -183,17 +179,15 @@ def resolve_node_arguments(
     )
 
 
-def resolve_remappings(
-    argument_name: str, argument_value: object
-) -> Optional[List[Tuple[str, str]]]:
+def resolve_remappings(argument_name: str, argument_value: object) -> list[tuple[str, str]] | None:
     """
     Convert remappings into the format expected by ROS 2 launch actions.
 
     A ROS 2 launch action expects each remapping as a tuple: `("from", "to")`.
-    When remappings come from JSON, each pair must be written as a two-item list because JSON cannot
-    contain tuples: `["from", "to"]`.
-    When remappings come from Python defaults, each pair may be written either as a two-item list or
-    as a two-item tuple: `["from", "to"]` or `("from", "to")`.
+    When remappings come from JSON, each pair must be written as a two-item list because JSON
+    cannot contain tuples: `["from", "to"]`.
+    When remappings come from Python defaults, each pair may be written either as a two-item list
+    or as a two-item tuple: `["from", "to"]` or `("from", "to")`.
 
     For example, this JSON value:
 
@@ -216,7 +210,7 @@ def resolve_remappings(
     if not isinstance(argument_value, list):
         raise ValueError(f"launch action argument '{argument_name}' must be a JSON list")
 
-    remappings: List[Tuple[str, str]] = []
+    remappings: list[tuple[str, str]] = []
 
     for index, remapping in enumerate(argument_value):
         if not isinstance(remapping, (list, tuple)) or len(remapping) != 2:
@@ -245,14 +239,14 @@ def resolve_remappings(
 
 
 def _resolve_action_arguments(
-    json_str_arguments: Optional[str],
+    json_str_arguments: str | None,
     *,
-    default_arguments: Optional[Dict[str, Any]],
+    default_arguments: dict[str, Any] | None,
     known_arguments: set[str],
     rejected_arguments: set[str],
-    extra_rejected_arguments: Optional[set[str]],
+    extra_rejected_arguments: set[str] | None,
     argument_resolver: Callable[[str, object], object],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Resolve defaults and one JSON launch argument into action keyword arguments.
 
@@ -350,13 +344,13 @@ def _resolve_action_arguments(
 
 
 def _resolve_argument_dict(
-    arguments: Dict[str, Any],
+    arguments: dict[str, Any],
     *,
     known_arguments: set[str],
     rejected_arguments: set[str],
     argument_resolver: Callable[[str, object], object],
     copy_resolved_mutable_values: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Validate and resolve every field in an argument dictionary.
 
@@ -367,10 +361,10 @@ def _resolve_argument_dict(
     ownership.
     Default arguments are Python objects that the launch file may keep and reuse, so their
     mutable values must be copied before they are returned.
-    JSON values come from `json.loads`, which already creates fresh Python objects for that resolver
-    call.
+    JSON values come from `json.loads`, which already creates fresh Python objects for that
+    resolver call.
     """
-    resolved_arguments: Dict[str, Any] = {}
+    resolved_arguments: dict[str, Any] = {}
 
     for argument_name, argument_value in arguments.items():
         # JSON object keys should always be strings, but Python defaults could contain any key.
@@ -402,8 +396,8 @@ def _copy_resolved_mutable_value(argument_value: object) -> object:
     """
     Return a shallow copy when the caller asks to detach a resolved mutable value.
 
-    Resolvers only produce simple launch-compatible values. A shallow copy is enough for the mutable
-    containers supported by this module: ``dict[str, str]`` and ``list[str]``.
+    Resolvers only produce simple launch-compatible values. A shallow copy is enough for the
+    mutable containers supported by this module: ``dict[str, str]`` and ``list[str]``.
     Remappings are already rebuilt as a new list of tuple pairs by ``resolve_remappings``.
     """
     if isinstance(argument_value, dict):
@@ -460,9 +454,9 @@ def _resolve_argument_bool(argument_name: str, argument_value: object) -> bool:
     """
     Return one launch action argument as a Python boolean.
 
-    JSON boolean values become ``True`` or ``False`` after ``json.loads``. Python defaults must also
-    use real booleans. Strings such as ``"true"`` are rejected because ROS 2 launch expects a real
-    boolean for these fields.
+    JSON boolean values become ``True`` or ``False`` after ``json.loads``. Python defaults must
+    also use real booleans. Strings such as ``"true"`` are rejected because ROS 2 launch expects a
+    real boolean for these fields.
     """
     if not isinstance(argument_value, bool):
         raise ValueError(f"launch action argument '{argument_name}' must be a boolean")
@@ -485,7 +479,7 @@ def _resolve_argument_int(argument_name: str, argument_value: object) -> int:
 
 def _resolve_argument_string_list(
     argument_name: str, argument_value: object, expected_type: str = 'list of strings'
-) -> List[str]:
+) -> list[str]:
     """
     Return one launch action argument as a list of strings.
 
@@ -502,12 +496,12 @@ def _resolve_argument_string_list(
                 f"launch action argument '{argument_name}' item {index} must be a string"
             )
 
-    return cast(List[str], argument_value)
+    return cast(list[str], argument_value)
 
 
 def _resolve_argument_optional_string_dict(
     argument_name: str, argument_value: object
-) -> Optional[Dict[str, str]]:
+) -> dict[str, str] | None:
     """
     Return one launch action argument as ``None`` or ``dict[str, str]``.
 
@@ -528,18 +522,20 @@ def _resolve_argument_optional_string_dict(
             )
 
         if not isinstance(env_value, str):
-            raise ValueError(f"launch action argument '{argument_name}.{env_key}' must be a string")
+            raise ValueError(
+                f"launch action argument '{argument_name}.{env_key}' must be a string"
+            )
 
-    return cast(Dict[str, str], argument_value)
+    return cast(dict[str, str], argument_value)
 
 
-def _resolve_argument_optional_float(argument_name: str, argument_value: object) -> Optional[float]:
+def _resolve_argument_optional_float(argument_name: str, argument_value: object) -> float | None:
     """
     Return one launch action argument as ``None`` or a finite Python float.
 
-    This is used for fields such as ``respawn_delay``. Integers are accepted and converted to floats
-    because that does not change the meaning of the value. Booleans are rejected even though Python
-    treats ``bool`` as a subclass of ``int``.
+    This is used for fields such as ``respawn_delay``. Integers are accepted and converted to
+    floats because that does not change the meaning of the value. Booleans are rejected even though
+    Python treats ``bool`` as a subclass of ``int``.
     """
     if argument_value is None:
         return None
@@ -555,7 +551,7 @@ def _resolve_argument_optional_float(argument_name: str, argument_value: object)
 
 def _resolve_argument_optional_string_list(
     argument_name: str, argument_value: object
-) -> Optional[List[str]]:
+) -> list[str] | None:
     """
     Return one launch action argument as ``None`` or ``list[str]``.
 
@@ -571,7 +567,7 @@ def _resolve_argument_optional_string_list(
 
 def _resolve_argument_optional_substitution(
     argument_name: str, argument_value: object
-) -> Optional[str | List[str]]:
+) -> str | list[str] | None:
     """
     Return one optional launch substitution argument.
 
@@ -598,7 +594,7 @@ def _resolve_argument_str(argument_name: str, argument_value: object) -> str:
     return argument_value
 
 
-def _resolve_argument_substitution(argument_name: str, argument_value: object) -> str | List[str]:
+def _resolve_argument_substitution(argument_name: str, argument_value: object) -> str | list[str]:
     """
     Return one required launch substitution argument.
 
@@ -626,4 +622,6 @@ def _resolve_argument_substitution(argument_name: str, argument_value: object) -
     if isinstance(argument_value, str):
         return argument_value
 
-    return _resolve_argument_string_list(argument_name, argument_value, 'string or list of strings')
+    return _resolve_argument_string_list(
+        argument_name, argument_value, 'string or list of strings'
+    )
