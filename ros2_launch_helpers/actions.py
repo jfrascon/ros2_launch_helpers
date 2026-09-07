@@ -8,16 +8,16 @@ functions, and write the computed values back into the launch context.
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from launch import Action, LaunchContext
+from launch import Action
+from launch import LaunchContext
 from launch.utilities import perform_substitutions
-from launch.utilities.type_utils import normalize_to_list_of_substitutions, SomeSubstitutionsType
+from launch.utilities.type_utils import normalize_to_list_of_substitutions
+from launch.utilities.type_utils import SomeSubstitutionsType
 
-from .helpers import (
-    make_namespace_absolute,
-    make_robot_namespace,
-    make_robot_prefix,
-    render_params_file,
-)
+from .helpers import make_namespace_absolute
+from .helpers import make_robot_namespace
+from .helpers import make_robot_prefix
+from .helpers import render_params_file
 
 
 def _resolve_context_key(

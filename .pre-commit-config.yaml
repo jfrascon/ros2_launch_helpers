@@ -55,7 +55,7 @@ repos:
   # Python hooks
   # Ruff replaces both Black (formatter) and isort (import sorting).
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.5
+    rev: v0.16.6
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -65,6 +65,13 @@ repos:
   # These hooks validate Python after Ruff applies its automatic changes.
   - repo: local
     hooks:
+      # - id: ament_mypy
+      #   name: ament_mypy
+      #   description: Statically check Python type annotations with mypy.
+      #   entry: ament_mypy
+      #   language: system
+      #   types: [python]
+
       - id: ament_flake8
         name: ament_flake8
         description: Check Python code with the ROS 2 Flake8 configuration.
@@ -97,15 +104,47 @@ repos:
       - id: pretty-format-yaml
         args: [--autofix, --preserve-quotes, --offset, "2"]
 
-  # ROS 2 XML validation
+  # ROS/ament hooks
+  # These hooks use language: system and require the corresponding ament tools
+  # to be installed in the development environment.
   - repo: local
     hooks:
+      - id: ament_lint_cmake
+        name: ament_lint_cmake
+        description: Check format of CMakeLists.txt files.
+        entry: ament_lint_cmake
+        language: system
+        files: CMakeLists\.txt$
+
       - id: ament_xmllint
         name: ament_xmllint
         description: Check XML files with the ROS 2 XML linter.
         entry: ament_xmllint
         language: system
         types: [xml]
+
+      # Keep this hook as a reference for projects with a strict copyright policy.
+      # - id: ament_copyright
+      #   name: ament_copyright
+      #   description: Check if copyright notice is available in all files.
+      #   entry: ament_copyright
+      #   language: system
+      #   exclude: .*/conf\.py$
+
+  # Shell hooks
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        args: [-w, -s, -i=4]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1-1
+    hooks:
+      # ShellCheck may report many warnings in legacy scripts, but it catches real bugs.
+      # Prefer justified local suppressions over disabling the hook; for example,
+      # '# shellcheck disable=SC1091' before sourcing a file that only exists at runtime.
+      - id: shellcheck
 
   # Secrets scanning
   # Gitleaks detects tokens, passwords, PATs, API keys, and other secrets beyond private keys.

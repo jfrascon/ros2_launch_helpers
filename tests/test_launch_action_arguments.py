@@ -3,7 +3,8 @@ import json
 import math
 
 from launch.action import Action
-from launch.actions import ExecuteLocal, ExecuteProcess
+from launch.actions import ExecuteLocal
+from launch.actions import ExecuteProcess
 from launch_ros.actions import Node
 import pytest
 

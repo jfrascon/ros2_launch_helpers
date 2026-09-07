@@ -4,7 +4,9 @@ from pathlib import Path
 
 from launch import LaunchContext
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution
+from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import TextSubstitution
 import pytest
 
 import ros2_launch_helpers as rlh

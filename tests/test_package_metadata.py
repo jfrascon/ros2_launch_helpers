@@ -1,6 +1,5 @@
 """Test package metadata that is visible to ROS and Python callers."""
 
-import ast
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -12,44 +11,31 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_python_public_version_matches_packaging_version():
-    setup_tree = ast.parse(PACKAGE_ROOT.joinpath('setup.py').read_text(encoding='utf-8'))
-    setup_call = next(node for node in ast.walk(setup_tree) if isinstance(node, ast.Call))
-    setup_version = next(
-        keyword.value.value
-        for keyword in setup_call.keywords
-        if keyword.arg == 'version' and isinstance(keyword.value, ast.Constant)
-    )
-
     package_xml_version = (
         ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot().findtext('version')
     )
 
-    assert rlh.__version__ == setup_version == package_xml_version
+    assert rlh.__version__ == package_xml_version
 
 
-def test_setup_and_package_xml_descriptions_match():
-    setup_tree = ast.parse(PACKAGE_ROOT.joinpath('setup.py').read_text(encoding='utf-8'))
-    setup_call = next(node for node in ast.walk(setup_tree) if isinstance(node, ast.Call))
-    setup_description = next(
-        keyword.value.value
-        for keyword in setup_call.keywords
-        if keyword.arg == 'description' and isinstance(keyword.value, ast.Constant)
-    )
-
+def test_package_xml_description_matches_public_contract():
     package_xml_description = (
         ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot().findtext('description')
     )
 
-    assert setup_description == ' '.join(package_xml_description.split())
+    assert ' '.join(package_xml_description.split()) == (
+        'Helpers for ROS 2 launch files: parameter rendering, action arguments, '
+        'and namespace handling.'
+    )
 
 
-def test_package_xml_uses_ament_python_buildtool():
+def test_package_xml_uses_ament_cmake_buildtools():
     package_xml_root = ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot()
     buildtool_depends = [element.text for element in package_xml_root.findall('buildtool_depend')]
     build_type = package_xml_root.findtext('./export/build_type')
 
-    assert build_type == 'ament_python'
-    assert buildtool_depends == ['ament_python']
+    assert build_type == 'ament_cmake'
+    assert buildtool_depends == ['ament_cmake', 'ament_cmake_python']
 
 
 def test_package_xml_declares_rclpy_runtime_dependency():
@@ -63,7 +49,14 @@ def test_package_xml_declares_only_registered_test_dependencies():
     package_xml_root = ElementTree.parse(PACKAGE_ROOT.joinpath('package.xml')).getroot()
     test_depends = {element.text for element in package_xml_root.findall('test_depend')}
 
-    assert test_depends == {'ament_flake8', 'ament_pep257', 'ament_xmllint', 'python3-pytest'}
+    assert test_depends == {
+        'ament_cmake_flake8',
+        'ament_cmake_lint_cmake',
+        'ament_cmake_pep257',
+        'ament_cmake_pytest',
+        'ament_cmake_xmllint',
+        'ament_lint_auto',
+    }
 
 
 def test_current_name_helpers_are_exported():
