@@ -15,14 +15,9 @@ This package helps launch files do a few common tasks:
 
 ## Launch actions
 
-Use actions when a launch file needs to resolve launch substitutions, compute a new value, and write that new value back into the launch context.
-The action owns the launch-runtime part.
-A helper function owns the simple computation.
-This keeps the computation easy to test without running a full launch description.
+Use actions when a launch file needs to resolve launch substitutions, compute a new value, and write it back into the launch context. Each action handles evaluation during launch while delegating the underlying computation to a helper function, which can be tested without running a full launch description.
 
-The actions are normal ROS 2 launch actions.
-Put them in the `LaunchDescription`.
-If the launch file first needs to read the current launch context, create or return them from an `OpaqueFunction` callback.
+These are standard ROS 2 launch actions and can be added directly to the `LaunchDescription`. If creating them requires reading the current launch context first, create or return them from an `OpaqueFunction` callback.
 
 ```python
 import ros2_launch_helpers as rlh
@@ -60,19 +55,28 @@ def generate_launch_description():
     )
 ```
 
-Action inputs accept normal ROS 2 launch substitutions.
-A plain string is literal text.
-Use `LaunchConfiguration('robot_name')` when the action should read a launch argument or another value from the launch context.
-Output context key arguments also accept substitutions; they must resolve to a non-empty launch configuration key.
+Action inputs accept standard ROS 2 launch substitutions: a plain string supplies literal text, while `LaunchConfiguration('robot_name')` reads a launch argument or another value from the launch context. Output context key arguments also accept substitutions, but must resolve to a non-empty launch configuration key.
 
 - `SetGlobalNamespace(namespace=..., output_context_key=...)` resolves one namespace value and writes the absolute namespace to the resolved output context key.
 - `SetRobotNamespace(namespace=..., robot_name=..., output_context_key=...)` resolves a parent namespace and robot name, then writes the combined namespace to the resolved output context key.
 - `SetRobotPrefix(robot_name=..., output_context_key=...)` resolves a robot name, then writes the robot prefix to the resolved output context key.
 - `RequireDirectory(path=...)` resolves a filesystem path and requires it to be an existing directory.
 - `RequireFile(path=...)` resolves a filesystem path and requires it to be an existing file.
-- `RenderParamsFile(params_file=..., output_context_key=...)` resolves a filesystem path, renders the file using the current launch context, and writes the rendered path to the resolved output context key.
-  The rendered temporary file remains available after launch shutdown.
-  Use the standard launch `condition` argument when rendering should happen only for some launch configurations.
+- `RenderParamsFile(params_file=..., output_context_key=...)` resolves a filesystem path, renders the file using the current launch context, and writes the rendered path to the resolved output context key. The temporary file remains available after launch shutdown, and the standard launch `condition` argument can restrict rendering to selected launch configurations.
+
+`ProcessParamsFile` prepares a single chosen file according to an explicit rendering flag:
+
+```python
+rlh.ProcessParamsFile(
+    params_file=LaunchConfiguration('robot_params_file'),
+    allow_substs=LaunchConfiguration('robot_params_file_allow_substs'),
+    output_context_key='resolved_robot_params_file',
+)
+```
+
+The selected file must exist regardless of whether rendering is enabled. The `allow_substs` flag accepts a Python boolean or launch substitutions evaluated with ROS launch's typed boolean conversion, which rejects invalid values. When enabled, the action returns `RenderParamsFile`; otherwise, it returns `SetLaunchConfiguration` to publish the original path.
+
+Because the flag controls rendering independently of the filename, debug entry points can accept package-owned or external files without requiring a directory convention. Downstream consumers should use the output path with further rendering disabled to avoid processing substitutions twice. The standard launch `condition` argument can disable the action entirely.
 
 `ResolveParamsFile` selects between a direct parameter YAML and a template:
 
@@ -86,14 +90,9 @@ rlh.ResolveParamsFile(
 )
 ```
 
-Import `PathJoinSubstitution` from `launch.substitutions` for this example.
-Both paths and the output key accept launch substitutions. Exactly one candidate must exist and
-be a file; both candidates, neither candidate, directories, and empty inputs cause an error.
-The action returns one child action for launch to execute: `SetLaunchConfiguration` for the direct
-file or `RenderParamsFile` for the template. Subsequent actions consume the selected path from
-`LaunchConfiguration('robot_params_file')` with further rendering disabled. The filenames above
-are an example; callers may supply other names and directories. The standard `condition` argument
-can disable selection entirely. `RenderParamsFile` remains available for unconditional rendering.
+The example requires importing `PathJoinSubstitution` from `launch.substitutions`, but its filenames and directory layout are only illustrative: callers supply both candidate paths explicitly. Both paths and the output key accept launch substitutions. Exactly one candidate must exist and be a regular file; empty inputs, directories, and cases where both or neither candidate exists cause an error.
+
+Once the source is selected, the action returns one child action for launch to execute: `SetLaunchConfiguration` publishes the direct file path, while `RenderParamsFile` renders the template and publishes the generated path. Subsequent actions read that path through `LaunchConfiguration('robot_params_file')` with further rendering disabled. The standard launch `condition` argument can disable selection entirely, and `RenderParamsFile` remains available for unconditional rendering.
 
 The lower-level helpers remain available for code that already has concrete values:
 
@@ -107,25 +106,13 @@ robot_prefix = rlh.make_robot_prefix('front')
 
 Use `bridge_arguments_json_str`, `speed_controller_arguments_json_str`, or a similar launch argument when a launch file should let the application configure optional fields of one `Node`, `ExecuteProcess`, or `ExecuteLocal` action.
 
-Without this helper, the launch file would need one launch argument for every optional field.
-That becomes hard to read when a launch file starts several nodes or processes.
+Declaring a separate launch argument for every optional field makes launch files harder to read as the number of nodes and processes grows. With this helper, each configurable action instead receives its own JSON string containing the action arguments directly, without an enclosing key such as `"bridge"`.
 
-With this helper, each configurable action receives its own JSON string.
-The JSON object contains the arguments for that action directly.
-There is no extra key such as `"bridge"` inside the JSON.
+The launch file author can also provide `default_arguments` as Python values, which the helper validates before returning the resolved arguments. When both the JSON object and `default_arguments` define a field, the JSON value takes precedence.
 
-The launch file may also provide `default_arguments`.
-Defaults are normal Python values written by the launch file author.
-They are validated by the same helper before they are returned.
-If the JSON object and `default_arguments` define the same field, the JSON value wins.
+Keep fields such as `package`, `executable`, `parameters`, and `cmd` explicit in Python so that readers can see what the launch file starts and how it is configured. The rationale is explained in [Launch action arguments technical design](doc/launch_action_arguments_design.md).
 
-Some fields should still stay in the Python launch file.
-For example, the launch file should normally keep `package`, `executable`, `parameters`, and `cmd` visible in Python code.
-For the longer explanation, see [Launch action arguments technical design](doc/launch_action_arguments_design.md).
-
-Resolve the JSON string inside code that has a `LaunchContext`.
-A common pattern is to do it inside an `OpaqueFunction` callback.
-The callback reads the JSON string and passes the returned arguments to the action with `**bridge_arguments`.
+Resolve the JSON string where a `LaunchContext` is available, typically inside an `OpaqueFunction` callback. The callback can then pass the resolved arguments to the action with `**bridge_arguments`, as shown below.
 
 ```python
 import ros2_launch_helpers as rlh
@@ -165,8 +152,7 @@ def generate_launch_description():
     )
 ```
 
-The helper applies no global `default_arguments`.
-Each launch file supplies `default_arguments` for the action it is creating.
+Each launch file supplies `default_arguments` for the action it creates; the helper does not apply global defaults.
 
 ## JSON format
 
@@ -201,28 +187,20 @@ Example `bridge_arguments_json_str` value:
 
 ## Supported fields
 
-The supported fields come from `Node`, `ExecuteProcess`, and `ExecuteLocal`.
-The JSON string must use JSON-compatible values.
-`default_arguments` uses Python values, but it follows the same value shapes where possible.
-When a field is optional in the original ROS 2 constructor, `null` in JSON or `None` in Python is accepted.
+The supported fields follow the constructors of `Node`, `ExecuteProcess`, and `ExecuteLocal`. JSON overrides must use JSON-compatible values, while Python `default_arguments` follow the same value shapes where possible. Fields that are optional in the original ROS 2 constructor also accept `null` in JSON or `None` in Python.
 
 From `launch_ros.actions.Node`:
 
-- `name`: string preferred, `list[string]` and null accepted.
-  For `Node`, this is the ROS node name.
-- `exec_name`: string preferred, `list[string]` and null accepted.
-  For `Node`, this is forwarded as the launch process label.
+- `name`: the ROS node name; a string is preferred, but `list[string]` and null are also accepted.
+- `exec_name`: the launch process label; a string is preferred, but `list[string]` and null are also accepted.
 - `namespace`: string preferred, `list[string]` and null accepted.
-- `remappings`: list of two-item lists or null.
-  In `default_arguments`, each pair may also be a tuple, for example `[('from', 'to')]`.
-  The helper converts each pair into a tuple for `Node`.
+- `remappings`: a list of two-item lists or null. In Python `default_arguments`, each pair may also be a tuple, for example `[('from', 'to')]`; the helper converts all pairs into tuples for `Node`.
 - `ros_arguments`: `list[string]` or null.
 - `arguments`: `list[string]` or null.
 
 From `launch.actions.ExecuteProcess`:
 
-- `name`: string preferred, `list[string]` and null accepted.
-  For `ExecuteProcess`, this is the launch process label.
+- `name`: the launch process label; a string is preferred, but `list[string]` and null are also accepted.
 - `prefix`: string preferred, `list[string]` and null accepted.
 - `cwd`: string preferred, `list[string]` and null accepted.
 - `env`: object with string keys and string values, or null.
@@ -252,15 +230,11 @@ The helper rejects fields that should stay explicit in the launch file:
 - `on_exit`
 - `condition`
 
-See [doc/launch_action_arguments_design.md](doc/launch_action_arguments_design.md) for the full design notes.
-That document also lists the ROS 2 source files used to define this supported field list.
+The [technical design document](doc/launch_action_arguments_design.md) provides the full rationale and lists the ROS 2 source files used to define the supported fields.
 
 ## SomeSubstitutionsType values
 
-When a field accepts ROS 2 launch `SomeSubstitutionsType`, the JSON value may be a string or a list of strings.
-Prefer the string form.
-JSON cannot represent launch `Substitution` objects such as `LaunchConfiguration` or `FindPackageShare`.
-In this helper, the list form only concatenates strings, so it is usually harder to read.
+Fields that accept ROS 2 launch `SomeSubstitutionsType` can receive a JSON string or a list of strings. Prefer a single string for readability, since the helper only concatenates list elements. Neither form can represent launch `Substitution` objects such as `LaunchConfiguration` or `FindPackageShare`.
 
 Preferred:
 
@@ -278,8 +252,7 @@ Accepted:
 }
 ```
 
-`list[string]` is concatenated.
-For example, `["2", "5"]` becomes `"25"` seconds.
+Concatenation does not insert separators: for example, `["2", "5"]` becomes `"25"` seconds.
 
 ## Name and exec name
 
@@ -297,5 +270,4 @@ When arguments are passed directly to `ExecuteProcess`, `name` is the launch pro
 
 ## License
 
-This package is distributed under the Apache License 2.0.
-See [LICENSE](LICENSE) for the complete terms.
+This package is distributed under the Apache License 2.0; see [LICENSE](LICENSE) for the complete terms.

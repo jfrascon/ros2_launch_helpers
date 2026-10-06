@@ -13,6 +13,8 @@ from launch import LaunchContext
 from launch.actions import SetLaunchConfiguration
 from launch.utilities import perform_substitutions
 from launch.utilities.type_utils import normalize_to_list_of_substitutions
+from launch.utilities.type_utils import normalize_typed_substitution
+from launch.utilities.type_utils import perform_typed_substitution
 from launch.utilities.type_utils import SomeSubstitutionsType
 
 from .helpers import make_namespace_absolute
@@ -99,6 +101,65 @@ class RenderParamsFile(Action):
 
         render_params_file(params_file, context, output_path)
         context.launch_configurations[output_context_key] = str(output_path)
+
+
+class ProcessParamsFile(Action):
+    """
+    Prepare one chosen parameter file according to an explicit substitution flag.
+
+    params_file and output_context_key accept launch substitutions. allow_substs accepts a bool
+    or launch substitutions that resolve to a boolean. The input must be an existing file in both
+    modes, and the output key must be non-empty. Filenames do not determine whether rendering runs.
+
+    execute returns one child action for launch to execute before subsequent actions. When
+    allow_substs is true, RenderParamsFile publishes a rendered temporary path. Otherwise,
+    SetLaunchConfiguration publishes the original path. Consumers use that output key with further
+    rendering disabled, so substitutions are processed only once.
+    """
+
+    def __init__(
+        self,
+        params_file: SomeSubstitutionsType,
+        allow_substs: bool | SomeSubstitutionsType,
+        output_context_key: SomeSubstitutionsType,
+        **kwargs,
+    ) -> None:
+        """Store the source, processing policy, and output key for evaluation during launch."""
+        super().__init__(**kwargs)
+        self.params_file = normalize_to_list_of_substitutions(params_file)
+        # Convert literal strings to text substitutions before typed normalization. ROS launch
+        # otherwise treats a string as an already typed scalar and rejects it as a boolean.
+        policy = (
+            allow_substs if isinstance(allow_substs, bool)
+            else normalize_to_list_of_substitutions(allow_substs)
+        )
+        self.allow_substs = normalize_typed_substitution(policy, bool)
+        self.output_context_key = normalize_to_list_of_substitutions(output_context_key)
+
+    def execute(self, context: LaunchContext) -> list[Action]:
+        """Validate the selected input and return its rendering or path-publication action."""
+        # Earlier launch actions may set the path and policy. Resolve them at execution time,
+        # using ROS launch's typed conversion so invalid boolean values raise an error.
+        params_file = perform_substitutions(context, self.params_file)
+        allow_substs = perform_typed_substitution(context, self.allow_substs, bool)
+        output_context_key = _resolve_context_key(
+            context, self.output_context_key, 'output_context_key'
+        )
+        if not params_file:
+            raise ValueError('params_file must resolve to a non-empty filesystem path.')
+
+        # Validate even when rendering is disabled: publishing a missing path would postpone
+        # the failure until a child launch attempts to load its node parameters.
+        if not Path(params_file).is_file():
+            raise FileNotFoundError(f"Params file '{params_file}' does not exist or is not a file.")
+
+        # Return the chosen action for launch to execute. Both branches publish the same output
+        # key, so consumers do not need to know whether their parameter file was rendered.
+        if allow_substs:
+            return [
+                RenderParamsFile(params_file=params_file, output_context_key=output_context_key)
+            ]
+        return [SetLaunchConfiguration(output_context_key, params_file)]
 
 
 class ResolveParamsFile(Action):

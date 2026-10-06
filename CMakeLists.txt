@@ -34,6 +34,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_require_data_shapes tests/test_require_data_shapes.py TIMEOUT 120)
   ament_add_pytest_test(test_resolve_file tests/test_resolve_file.py TIMEOUT 120)
   ament_add_pytest_test(test_resolve_params_file tests/test_resolve_params_file.py TIMEOUT 120)
+  ament_add_pytest_test(test_process_params_file tests/test_process_params_file.py TIMEOUT 120)
 endif()
 
 ament_package()

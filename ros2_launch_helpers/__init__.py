@@ -1,5 +1,6 @@
 from ament_index_python.packages import PackageNotFoundError
 
+from .actions import ProcessParamsFile
 from .actions import RenderParamsFile
 from .actions import RequireDirectory
 from .actions import RequireFile
@@ -43,6 +44,7 @@ __all__ = [
     'RequireDirectory',
     'RequireFile',
     'RenderParamsFile',
+    'ProcessParamsFile',
     'ResolveParamsFile',
     'SetGlobalNamespace',
     'SetRobotNamespace',
