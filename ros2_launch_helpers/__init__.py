@@ -3,6 +3,7 @@ from ament_index_python.packages import PackageNotFoundError
 from .actions import RenderParamsFile
 from .actions import RequireDirectory
 from .actions import RequireFile
+from .actions import ResolveParamsFile
 from .actions import SetGlobalNamespace
 from .actions import SetRobotNamespace
 from .actions import SetRobotPrefix
@@ -42,6 +43,7 @@ __all__ = [
     'RequireDirectory',
     'RequireFile',
     'RenderParamsFile',
+    'ResolveParamsFile',
     'SetGlobalNamespace',
     'SetRobotNamespace',
     'SetRobotPrefix',

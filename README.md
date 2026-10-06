@@ -74,6 +74,27 @@ Output context key arguments also accept substitutions; they must resolve to a n
   The rendered temporary file remains available after launch shutdown.
   Use the standard launch `condition` argument when rendering should happen only for some launch configurations.
 
+`ResolveParamsFile` selects between a direct parameter YAML and a template:
+
+```python
+rlh.ResolveParamsFile(
+    params_file=PathJoinSubstitution([LaunchConfiguration('robot_dir'), 'params.yaml']),
+    template_params_file=PathJoinSubstitution(
+        [LaunchConfiguration('robot_dir'), 'params.template.yaml']
+    ),
+    output_context_key='robot_params_file',
+)
+```
+
+Import `PathJoinSubstitution` from `launch.substitutions` for this example.
+Both paths and the output key accept launch substitutions. Exactly one candidate must exist and
+be a file; both candidates, neither candidate, directories, and empty inputs cause an error.
+The action returns one child action for launch to execute: `SetLaunchConfiguration` for the direct
+file or `RenderParamsFile` for the template. Subsequent actions consume the selected path from
+`LaunchConfiguration('robot_params_file')` with further rendering disabled. The filenames above
+are an example; callers may supply other names and directories. The standard `condition` argument
+can disable selection entirely. `RenderParamsFile` remains available for unconditional rendering.
+
 The lower-level helpers remain available for code that already has concrete values:
 
 ```python
