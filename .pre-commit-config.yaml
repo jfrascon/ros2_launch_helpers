@@ -55,7 +55,7 @@ repos:
   # Python hooks
   # Ruff replaces both Black (formatter) and isort (import sorting).
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+    rev: v0.17.5
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -133,7 +133,7 @@ repos:
 
   # Shell hooks
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.13.1-1
+    rev: v3.14.1-1
     hooks:
       - id: shfmt
         args: [-w, -s, -i=4]
@@ -156,7 +156,7 @@ repos:
 
   # Conventional Commits validation (commit message hook)
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.4.0
+    rev: v4.5.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
